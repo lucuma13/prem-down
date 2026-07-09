@@ -31,7 +31,7 @@ jobs:
       - name: go mod tidy check
         run: go mod tidy -diff
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.5.0 ./...
       - name: cross-compile check
         run: |
           GOOS=darwin  GOARCH=arm64 go build ./...
@@ -52,6 +52,12 @@ jobs:
         with:
           schema: https://json.schemastore.org/github-workflow.json
           files: .github/workflows/**.yml
+      - name: Validate GoReleaser config
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
       - name: Audit CI workflows (zizmor)
         uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
         with:
@@ -77,4 +83,10 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Run test suite
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
