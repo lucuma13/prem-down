@@ -88,7 +88,7 @@ func TestCacheRoundTrip(t *testing.T) {
 	// not count as fresh forever.
 	n.checkInterval = updateCheckInterval
 	future := fmt.Sprintf(`{"latest": "0.9", "checked_at": %d}`, time.Now().Add(time.Hour).Unix())
-	if err := os.WriteFile(n.cachePath, []byte(future), 0o644); err != nil {
+	if err := os.WriteFile(n.cachePath, []byte(future), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	if _, ok := n.readCache(); ok {
@@ -97,7 +97,7 @@ func TestCacheRoundTrip(t *testing.T) {
 
 	// A corrupt cache means "check again", nothing more.
 	n.checkInterval = updateCheckInterval
-	if err := os.WriteFile(n.cachePath, []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(n.cachePath, []byte("not json"), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	if _, ok := n.readCache(); ok {
@@ -109,7 +109,7 @@ func TestFetchStoresAndCachesLatest(t *testing.T) {
 	var gotUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
-		w.Write([]byte(`{"tag_name": "v9.9.9"}`))
+		_, _ = w.Write([]byte(`{"tag_name": "v9.9.9"}`))
 	}))
 	defer srv.Close()
 
@@ -133,7 +133,7 @@ func TestFetchStoresAndCachesLatest(t *testing.T) {
 }
 
 func TestFetchFailuresAreSilent(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "rate limited", http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -164,7 +164,7 @@ func captureStderr(t *testing.T, f func()) string {
 	orig := os.Stderr
 	os.Stderr = w
 	f()
-	w.Close()
+	_ = w.Close()
 	os.Stderr = orig
 	out, _ := io.ReadAll(r)
 	return string(out)
@@ -224,8 +224,8 @@ func TestFetchIgnoresUnusableResponses(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte(body))
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
 			}))
 			defer srv.Close()
 
@@ -260,7 +260,7 @@ func TestCacheNoPathIsNoOp(t *testing.T) {
 func TestWriteCacheDirFailureIsSilent(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	n := newUpdateNotifier("0.1")
@@ -294,7 +294,7 @@ func TestEnabledOptOuts(t *testing.T) {
 			t.Errorf("enabled() with %s=1, want disabled", v)
 		}
 		t.Setenv(v, "")
-		os.Unsetenv(v)
+		_ = os.Unsetenv(v)
 	}
 	// Even with no opt-out set, tests run with stderr redirected (not a
 	// terminal), so the check stays disabled and start() is a no-op.

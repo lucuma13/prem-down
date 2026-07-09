@@ -216,7 +216,7 @@ func (n *updateNotifier) fetch() {
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return
 	}
@@ -266,7 +266,7 @@ func (n *updateNotifier) writeCache(latest string) {
 	if n.cachePath == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(n.cachePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(n.cachePath), 0o750); err != nil {
 		return
 	}
 	payload, err := json.Marshal(updateCache{Latest: latest, CheckedAt: time.Now().Unix()})
@@ -277,7 +277,7 @@ func (n *updateNotifier) writeCache(latest string) {
 	// rename (this goroutine is abandoned once notify's timeout passes).
 	if stale, err := filepath.Glob(n.cachePath + ".tmp.*"); err == nil {
 		for _, s := range stale {
-			os.Remove(s)
+			_ = os.Remove(s)
 		}
 	}
 	tmp := fmt.Sprintf("%s.tmp.%d", n.cachePath, os.Getpid())
@@ -286,6 +286,6 @@ func (n *updateNotifier) writeCache(latest string) {
 		return
 	}
 	if err := os.Rename(tmp, n.cachePath); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 	}
 }

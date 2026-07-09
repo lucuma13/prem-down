@@ -1,5 +1,5 @@
-// `prem-down` downgrades an Adobe Premiere Pro project file (`.prproj`) so an
-// older version of Premiere can open it.
+// Package main implements prem-down, which downgrades an Adobe Premiere Pro
+// project file (`.prproj`) so an older version of Premiere can open it.
 //
 // It fully supports the breaking changes introduced with *Premiere Pro 2026*.
 // The well-known method (gunzip the `.prproj`, lower the top-level `<Project>`
@@ -11,12 +11,12 @@
 // version to the target release.
 //
 // Usage example:
-//  ```
-//  prem-down myproject.prproj
-//  ```
+//
+//	```
+//	prem-down myproject.prproj
+//	```
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
-
 package main
 
 import (
@@ -459,7 +459,7 @@ func getProjectVersion(xml string) int {
 // a write error later instead of looping here forever.
 func uniquePath(path string) string {
 	taken := func(p string) bool {
-		_, err := os.Stat(p)
+		_, err := os.Stat(p) //nolint:gosec // G703: p derives from a user-supplied CLI path; stat-ing it is the tool's purpose
 		return err == nil
 	}
 	if !taken(path) {
@@ -476,7 +476,7 @@ func uniquePath(path string) string {
 }
 
 func downgrade(src, dst string, projectVersion int, verbose bool) {
-	raw, err := os.ReadFile(src)
+	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
 	if err != nil {
 		fatal("error: %v", err)
 	}
@@ -559,14 +559,14 @@ func downgrade(src, dst string, projectVersion int, verbose bool) {
 	if err := zw.Close(); err != nil {
 		fatal("error: %v", err)
 	}
-	if err := os.WriteFile(dst, out.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(dst, out.Bytes(), 0o644); err != nil { //nolint:gosec // G306: output is a project file meant to be opened/shared; 0644 is deliberate
 		fatal("error: %v", err)
 	}
 	fmt.Printf("wrote %s\n", dst)
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintf(w, `Usage: prem-down input.prproj [--to RELEASE]
+	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [--to RELEASE]
 
 Downgrade a Premiere Pro project to open with an older version, save next to original project.
 
@@ -619,7 +619,7 @@ func main() {
 	}
 
 	input := positionals[0]
-	if _, err := os.Stat(input); err != nil {
+	if _, err := os.Stat(input); err != nil { //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
 		fatal("error: %s not found", input)
 	}
 

@@ -170,7 +170,7 @@ func TestResolveRelease(t *testing.T) {
 		"2025":    43,
 		"CS4":     22,
 		"cs4":     22, // case-insensitive
-		"  2025 ": 43, // trimmed
+		"  2025 ": 43, //nolint:gocritic // mapKey: intentional whitespace, exercises resolveRelease's trimming
 		"cc2014":  27, // alias, case-insensitive
 		"CC2014":  27,
 	}
@@ -212,7 +212,7 @@ func TestWarnTarget(t *testing.T) {
 		orig := os.Stderr
 		os.Stderr = w
 		warnTarget(version)
-		w.Close()
+		_ = w.Close()
 		os.Stderr = orig
 		out, _ := io.ReadAll(r)
 		return string(out)
@@ -238,7 +238,7 @@ func TestUniquePath(t *testing.T) {
 	}
 
 	// Once taken, a -1 suffix is added before the extension.
-	if err := os.WriteFile(base, nil, 0o644); err != nil {
+	if err := os.WriteFile(base, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	want1 := filepath.Join(dir, "out-1.prproj")
@@ -247,7 +247,7 @@ func TestUniquePath(t *testing.T) {
 	}
 
 	// With -1 also taken, it climbs to -2.
-	if err := os.WriteFile(want1, nil, 0o644); err != nil {
+	if err := os.WriteFile(want1, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	want2 := filepath.Join(dir, "out-2.prproj")
@@ -266,7 +266,7 @@ func TestDowngradePlainXMLInput(t *testing.T) {
 </PremiereData>`
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out.prproj")
@@ -303,7 +303,7 @@ func TestDowngradeAutoTargetVerbose(t *testing.T) {
 
 func gunzipFile(t *testing.T, path string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is a test-controlled temp file
 	if err != nil {
 		t.Fatal(err)
 	}
