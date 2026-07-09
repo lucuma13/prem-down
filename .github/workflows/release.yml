@@ -2,7 +2,7 @@
 name: Release
 on:
   push:
-    tags: ["v*"]
+    tags: ["[0-9]*"]
 permissions: {}
 jobs:
   release:
