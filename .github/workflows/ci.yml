@@ -83,6 +83,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Run test suite
+        shell: bash
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
