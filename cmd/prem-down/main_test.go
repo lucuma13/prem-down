@@ -133,6 +133,53 @@ func TestSetAndGetProjectVersion(t *testing.T) {
 	}
 }
 
+func TestUsage(t *testing.T) {
+	var b strings.Builder
+	usage(&b)
+	got := b.String()
+	// The help must name the tool, the --to option, and give live release
+	// examples (so a stale hard-coded list can't silently drift from releases).
+	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", releaseExamples()} {
+		if !strings.Contains(got, want) {
+			t.Errorf("usage() output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// parseXML followed by render must reproduce the input byte-for-byte: that
+// round-trip invariant is what lets reconstructPositionalClasses leave
+// untouched instances exactly as Premiere wrote them. This also exercises the
+// self-closing, comment and declaration branches that the fixture path doesn't.
+func TestParseXMLRenderRoundTrip(t *testing.T) {
+	inputs := []string{
+		`<?xml version="1.0"?>
+<Root>
+	<Child Version="1">text</Child>
+	<SelfClosing Ref="7"/>
+	<!-- a comment -->
+	<Nested Version="2">
+		<Leaf>v</Leaf>
+	</Nested>
+</Root>`,
+		`plain text with no tags`,
+		`<Solo Version="1"/>`,
+	}
+	for _, in := range inputs {
+		var b strings.Builder
+		for _, r := range parseXML(in) {
+			switch v := r.(type) {
+			case string:
+				b.WriteString(v)
+			case *el:
+				v.render(&b)
+			}
+		}
+		if got := b.String(); got != in {
+			t.Errorf("round-trip changed the input:\n--- in ---\n%s\n--- out ---\n%s", in, got)
+		}
+	}
+}
+
 func TestReleaseNamesNewestFirst(t *testing.T) {
 	got := releaseNames()
 	names := strings.Split(got, ", ")
