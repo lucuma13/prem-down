@@ -6,15 +6,35 @@
 
 `prem-down` downgrades an Adobe Premiere Pro project file (`.prproj`) so an older version of Premiere can open it.
 
-It fully supports the breaking changes introduced with *Premiere Pro 2026*. The well-known method (gunzip the `.prproj`, lower the top-level `<Project>` `Version`, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation — it drops default-valued fields — but some classes (e.g. transitions, effect parameters) require those fields to be present in older releases.
+It fully supports the breaking changes introduced with *Premiere Pro 2026*. The well-known method (gunzip the `.prproj`, lower the top-level `<Project>` `Version`, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation — it drops fields that older releases expect present (and report the project as damaged if they are absent).
 
 So the fix is bifold:
-- re-insert the dropped fields with their default values
-- set the `<Project>` version to the target release.
+- re-insert those required fields
+- set the `<Project>` version to the target release
+
 
 ### 🚀 Installation
 
-Download and execute the binary from the [releases page](https://github.com/Lucuma13/prem-down/releases)
+##### macOS
+
+1. Install [Homebrew](https://brew.sh/) (if not already installed):
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+2. Tap and install:
+```
+brew tap lucuma13/dit
+brew install prem-down
+```
+
+##### Windows
+
+1. Install:
+
+```
+winget install -e --id lucuma13.prem-down
+```
 
 
 ### 📖 Usage examples
