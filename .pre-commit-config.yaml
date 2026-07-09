@@ -1,0 +1,75 @@
+---
+repos:
+  # Pre-commit configuration checks
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+      - id: check-useless-excludes
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+        exclude: \.md$
+  # Spellcheck
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.48.0 # pin to a concrete release; v1 is a mutable rolling tag
+    hooks:
+      - id: typos
+        args: [--force-exclude] # Flag only: removed default --write-changes
+  # Go multi-linter engine (includes formatter and other extras)
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.12.2
+    hooks:
+      - id: golangci-lint-fmt
+        args:
+          - -E=gofumpt
+      - id: golangci-lint-full
+        args:
+          - --enable=revive,gocritic,gosec
+          - --fix
+  # Go module tidiness and vulnerability check
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go-mod-tidy
+        entry: go mod tidy
+        language: system
+        files: \.(go|mod|sum)$
+        pass_filenames: false
+      - id: go-vulncheck
+        name: go-vulncheck
+        entry: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        language: system
+        files: \.go$
+        pass_filenames: false
+  # YAML formatter
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
+    hooks:
+      - id: yamlfmt
+        args: ["-formatter", "include_document_start=true,line_length=120"]
+  # YAML linter
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args:
+          - --config-data
+          - "{extends: default, rules: {line-length: {max: 120}, comments: {min-spaces-from-content: 1}}}"
+  # GitHub workflow schema validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.37.4
+    hooks:
+      - id: check-github-workflows
+        args: [--verbose]
+  # CI security auditing
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.26.1
+    hooks:
+      - id: zizmor

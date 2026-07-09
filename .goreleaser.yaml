@@ -1,0 +1,89 @@
+---
+version: 2
+
+project_name: prem-down
+
+builds:
+  - main: ./cmd/prem-down
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github-native
+
+# Homebrew tap: GoReleaser generates Casks/prem-down.rb (with archive URLs and
+# sha256s matching this release) and pushes it to the lucuma13/homebrew-dit
+# tap.
+#
+# A cask (not a formula) is used because Homebrew now steers pre-built binaries
+# to casks. The postflight hook strips the com.apple.quarantine attribute so
+# the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run.
+homebrew_casks:
+  - name: prem-down
+    repository:
+      owner: lucuma13
+      name: homebrew-dit
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/lucuma13/prem-down"
+    description: "Downgrade Premiere Pro project files so older versions can open them"
+    commit_author:
+      name: goreleaser-bot
+      email: goreleaser-bot@users.noreply.github.com
+    commit_msg_template: "prem-down: update to {{ .Tag }}"
+    hooks:
+      post:
+        install: |
+          if OS.mac? && File.exist?("#{staged_path}/prem-down")
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/prem-down"]
+          end
+
+# winget: GoReleaser generates the manifest from the Windows zip archive and
+# opens a pull request against microsoft/winget-pkgs
+winget:
+  - name: prem-down
+    publisher: lucuma13
+    license: MIT
+    homepage: "https://github.com/lucuma13/prem-down"
+    short_description: "Downgrade Premiere Pro project files so older versions can open them"
+    package_identifier: lucuma13.prem-down
+    commit_author:
+      name: goreleaser-bot
+      email: goreleaser-bot@users.noreply.github.com
+    commit_msg_template: "prem-down: update to {{ .Tag }}"
+    repository:
+      owner: lucuma13
+      name: winget-pkgs
+      branch: "prem-down-{{ .Version }}"
+      token: "{{ .Env.WINGET_PKGS_TOKEN }}"
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
