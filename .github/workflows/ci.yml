@@ -108,6 +108,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'integrate --remove failed' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'HKCU context-menu key still present after --remove' }
+          # The reg query above exits 1 (key absent) as the success case; reset so
+          # the pwsh step doesn't inherit that non-zero code as its own exit status.
+          exit 0
       - name: Uninstall MSI and verify cleanup
         shell: pwsh
         run: |
@@ -116,6 +119,8 @@ jobs:
           if (Test-Path 'C:\Program Files\prem-down\prem-down.exe') { throw 'exe still present after uninstall' }
           reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'context-menu registry key still present after uninstall' }
+          # As above: the absent-key reg query exits 1 as success; reset the step's exit code.
+          exit 0
   test:
     name: Tests (${{ matrix.os }})
     needs: [lint, audit]
