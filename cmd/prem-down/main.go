@@ -1,14 +1,16 @@
 // Package main implements prem-down, which downgrades an Adobe Premiere Pro
 // project file so an older version of Premiere can open it.
 //
-// It fully supports the breaking changes introduced with Premiere Pro 2026.
-// The well-known method (gunzip the `.prproj`, lower the top-level project
-// version, re-gzip) no longer works reliably on Premiere 2026 files. The
-// cause is that 2026 uses sparser serialisation — it drops fields that older
-// releases expect present (and report the project as damaged if they are absent).
+// Operation runs completely **offline and local** to your machine – no data is
+// ever uploaded to the internet.
 //
-// So the fix is bifold: re-insert those required fields, and set the project
-// version to the target release.
+// It fully supports the breaking changes introduced with **Premiere Pro 2026**.
+// The well-known method (gunzip the `.prproj`, lower the top-level project
+// version, re-gzip) no longer works reliably on Premiere 2026 files. The cause
+// is that 2026 uses sparser serialisation — it drops fields that older releases
+// expect present (and report the project as damaged if they are absent). So the
+// fix is bifold: re-insert those required fields, and set the project version
+// to the target release.
 //
 // Usage example:
 //
