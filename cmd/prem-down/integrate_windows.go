@@ -54,7 +54,7 @@ func installIntegration() error {
 		exe = resolved
 	}
 	for _, args := range contextMenuRegAdds(exe) {
-		if out, err := exec.Command("reg", args...).CombinedOutput(); err != nil {
+		if out, err := exec.Command("reg", args...).CombinedOutput(); err != nil { //nolint:gosec // G204: "reg" is constant; args are built internally from the resolved own-executable path, not external input
 			return fmt.Errorf("reg %s: %v: %s", args[0], err, out)
 		}
 	}
