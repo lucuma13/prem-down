@@ -319,7 +319,9 @@ func TestDowngradePlainXMLInput(t *testing.T) {
 	out := filepath.Join(dir, "out.prproj")
 	// verbose=true also exercises the "already compatible, only re-gating" report
 	// path taken for sources at/below the dense-serialisation floor.
-	downgrade(src, out, 41, true)
+	if err := downgrade(src, out, 41, true); err != nil {
+		t.Fatal(err)
+	}
 
 	outXML := string(gunzipFile(t, out))
 	if getProjectVersion(outXML) != 41 {
@@ -340,11 +342,31 @@ func TestDowngradeAutoTargetVerbose(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	out := filepath.Join(tmp, "out.prproj")
-	downgrade(fixture, out, 0, true)
+	if err := downgrade(fixture, out, 0, true); err != nil {
+		t.Fatal(err)
+	}
 
 	outXML := string(gunzipFile(t, out))
 	if got := getProjectVersion(outXML); got != 43 {
 		t.Fatalf("auto-target of v45 source = %d, want 43", got)
+	}
+}
+
+// downgrade returns an operational error (rather than exiting) for a file that
+// isn't a Premiere project, so a batch caller can report it and keep going. No
+// output file must be written for the failed input.
+func TestDowngradeReturnsErrorForNonPremiereFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(src, []byte("just some text"), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.prproj")
+	if err := downgrade(src, out, 43, false); err == nil {
+		t.Fatal("expected an error for a non-Premiere file, got nil")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written when the input is rejected")
 	}
 }
 
@@ -374,7 +396,9 @@ func TestPre2026PassThrough(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	out := filepath.Join(tmp, "out.prproj")
-	downgrade(fixture, out, 42, false)
+	if err := downgrade(fixture, out, 42, false); err != nil {
+		t.Fatal(err)
+	}
 
 	inXML := string(gunzipFile(t, fixture))
 	outXML := string(gunzipFile(t, out))
@@ -395,7 +419,9 @@ func TestDowngrade2026Fixture(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	out := filepath.Join(tmp, "out.prproj")
-	downgrade(fixture, out, 43, false)
+	if err := downgrade(fixture, out, 43, false); err != nil {
+		t.Fatal(err)
+	}
 	outXML := string(gunzipFile(t, out))
 
 	if getProjectVersion(outXML) != 43 {

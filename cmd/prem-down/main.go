@@ -16,6 +16,7 @@
 //
 //	```
 //	prem-down myproject.prproj
+//	prem-down a.prproj b.prproj c.prproj   # batch: each file downgraded independently
 //	```
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
@@ -493,27 +494,33 @@ func uniquePath(path string) string {
 	}
 }
 
-func downgrade(src, dst string, projectVersion int, verbose bool) {
+// downgrade converts one project file and returns an error rather than exiting,
+// so a caller processing several files can report a failure and move on to the
+// rest. The returned errors are operational (unreadable/unrecognised file,
+// out-of-range target, write failure); genuinely malformed XML still fails hard
+// inside the structural helpers (getProjectVersion, parseXML), since that means
+// a corrupt input rather than an ordinary skip.
+func downgrade(src, dst string, projectVersion int, verbose bool) error {
 	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
 	if err != nil {
-		fatal("error: %v", err)
+		return err
 	}
 	var xml string
 	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
 		zr, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
-			fatal("error: %s: %v", src, err)
+			return err
 		}
 		data, err := io.ReadAll(zr)
 		if err != nil {
-			fatal("error: %s: %v", src, err)
+			return err
 		}
 		xml = string(data)
 	} else {
 		xml = string(raw)
 	}
 	if !strings.Contains(xml, "<PremiereData") {
-		fatal("error: %s does not look like a Premiere project", src)
+		return fmt.Errorf("does not look like a Premiere project")
 	}
 
 	sourceVersion := getProjectVersion(xml)
@@ -521,7 +528,7 @@ func downgrade(src, dst string, projectVersion int, verbose bool) {
 	// This is a downgrader: an explicit --to at or above the source release is
 	// almost certainly user error, so refuse rather than stamp a higher version.
 	if projectVersion >= sourceVersion {
-		fatal("error: target version %d is not below the source version %d; "+
+		return fmt.Errorf("target version %d is not below the source version %d; "+
 			"--to must name an older release", projectVersion, sourceVersion)
 	}
 
@@ -530,7 +537,7 @@ func downgrade(src, dst string, projectVersion int, verbose bool) {
 	if projectVersion == 0 {
 		pv, name, ok := previousRelease(sourceVersion)
 		if !ok {
-			fatal("error: source is version %d; no known earlier release to "+
+			return fmt.Errorf("source is version %d; no known earlier release to "+
 				"downgrade to (use --to to force one)", sourceVersion)
 		}
 		projectVersion = pv
@@ -572,22 +579,24 @@ func downgrade(src, dst string, projectVersion int, verbose bool) {
 	var out bytes.Buffer
 	zw, _ := gzip.NewWriterLevel(&out, gzip.BestCompression)
 	if _, err := zw.Write([]byte(xml)); err != nil {
-		fatal("error: %v", err)
+		return err
 	}
 	if err := zw.Close(); err != nil {
-		fatal("error: %v", err)
+		return err
 	}
 	if err := os.WriteFile(dst, out.Bytes(), 0o644); err != nil { //nolint:gosec // G306: output is a project file meant to be opened/shared; 0644 is deliberate
-		fatal("error: %v", err)
+		return err
 	}
 	fmt.Printf("wrote %s\n", dst)
+	return nil
 }
 
 func usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [--to RELEASE]
+	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [input2.prproj ...] [--to RELEASE]
        prem-down integrate [--remove]
 
-Downgrade a Premiere Pro project to open with an older version, save next to original project.
+Downgrade one or more Premiere Pro projects to open with an older version, each
+saved next to its original project.
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
@@ -639,26 +648,41 @@ func main() {
 			positionals = append(positionals, a)
 		}
 	}
-	if len(positionals) != 1 {
+	if len(positionals) == 0 {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
 
-	input := positionals[0]
-	if _, err := os.Stat(input); err != nil { //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
-		fatal("error: %s not found", input)
-	}
-
 	// Explicit --to is resolved and validated up front; auto (empty) is deferred
-	// to downgrade, which needs the source version to pick the previous release.
+	// to downgrade, which needs each source's version to pick the previous
+	// release. Resolving once here also means a bad --to fails before any file is
+	// touched.
 	targetVersion := 0
 	if to != "" {
 		targetVersion = resolveRelease(to)
 		warnTarget(targetVersion)
 	}
 
-	ext := filepath.Ext(input)
-	dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
-	downgrade(input, dst, targetVersion, verbose)
+	// Each file is converted independently: a failure on one is reported and the
+	// rest still run, so a batch (a multi-file selection from the context menu, or
+	// a shell glob) isn't aborted by a single bad input. Exit non-zero if any
+	// failed.
+	failed := false
+	for _, input := range positionals {
+		if _, err := os.Stat(input); err != nil { //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
+			fmt.Fprintf(os.Stderr, "error: %s not found\n", input)
+			failed = true
+			continue
+		}
+		ext := filepath.Ext(input)
+		dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
+		if err := downgrade(input, dst, targetVersion, verbose); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", input, err)
+			failed = true
+		}
+	}
 	pauseIfGUI()
+	if failed {
+		os.Exit(1)
+	}
 }
