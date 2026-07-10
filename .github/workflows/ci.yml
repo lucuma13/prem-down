@@ -24,20 +24,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # no dependencies, nothing to cache
-      - name: gofmt
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: go vet
         run: go vet ./...
-      - name: golangci-lint
-        # Lint each target GOOS so platform-tagged files (integrate_darwin.go,
-        # integrate_windows.go) are checked; a single host-GOOS run skips them.
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-          for goos in darwin windows linux; do
-            echo "::group::golangci-lint GOOS=$goos"
-            GOOS=$goos "$(go env GOPATH)/bin/golangci-lint" run --enable=revive,gocritic,gosec ./...
-            echo "::endgroup::"
-          done
       - name: go mod tidy check
         run: go mod tidy -diff
       - name: govulncheck
@@ -47,6 +35,41 @@ jobs:
           GOOS=darwin  GOARCH=arm64 go build ./...
           GOOS=darwin  GOARCH=amd64 go build ./...
           GOOS=windows GOARCH=amd64 go build ./...
+  golangci:
+    name: golangci-lint (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lint each target GOOS so platform-tagged files are checked.
+        goos: [darwin, windows, linux]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # install-only puts the pinned golangci-lint on PATH (the action itself
+      # only runs `golangci-lint run`, so we invoke run + fmt ourselves).
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+          install-only: true
+      - name: golangci-lint
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: golangci-lint run --enable=revive,gocritic,gosec ./...
+      - name: gofumpt formatting
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: golangci-lint fmt --enable=gofumpt --diff ./...
   audit:
     name: Audit
     runs-on: ubuntu-latest
@@ -74,7 +97,7 @@ jobs:
           advanced-security: false
   installer:
     name: Windows installer check
-    needs: [lint, audit]
+    needs: [lint, golangci, audit]
     runs-on: windows-latest
     permissions:
       contents: read
@@ -133,7 +156,7 @@ jobs:
           exit 0
   test:
     name: Tests (${{ matrix.os }})
-    needs: [lint, audit]
+    needs: [lint, golangci, audit]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
