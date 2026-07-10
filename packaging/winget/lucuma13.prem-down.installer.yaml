@@ -1,3 +1,4 @@
+---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 # Template: __VERSION__, __SHA256__ and __PRODUCT_CODE__ are filled in by the
 # windows-installer job in release.yml from the MSI it just built.

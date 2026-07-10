@@ -332,7 +332,7 @@ func installIntegration() error {
 		return err
 	}
 	contents := filepath.Join(bundle, "Contents")
-	if err := os.MkdirAll(contents, 0o755); err != nil {
+	if err := os.MkdirAll(contents, 0o755); err != nil { //nolint:gosec // G301: a Services workflow bundle is world-traversable by convention
 		return err
 	}
 	document := fmt.Sprintf(quickActionDocumentPlist, xmlTextEscaper.Replace(quickActionScript))

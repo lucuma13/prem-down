@@ -77,8 +77,10 @@ jobs:
         shell: pwsh
         run: |
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @("$PWD\prem-down_windows_amd64.msi", 0))
-          $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @("SELECT Value FROM Property WHERE Property='ProductCode'"))
+          $openArgs = @("$PWD\prem-down_windows_amd64.msi", 0)
+          $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, $openArgs)
+          $query = "SELECT Value FROM Property WHERE Property='ProductCode'"
+          $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($query))
           $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
           $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
           $productCode = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)

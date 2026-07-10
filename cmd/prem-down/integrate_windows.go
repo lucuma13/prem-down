@@ -35,8 +35,10 @@ func contextMenuRegAdds(exe string) [][]string {
 	return [][]string{
 		{"add", contextMenuKey, "/ve", "/t", "REG_SZ", "/d", contextMenuTitle, "/f"},
 		{"add", contextMenuKey, "/v", "Icon", "/t", "REG_SZ", "/d", exe, "/f"},
-		{"add", contextMenuKey + `\command`, "/ve", "/t", "REG_SZ",
-			"/d", fmt.Sprintf(`"%s" --gui "%%1"`, exe), "/f"},
+		{
+			"add", contextMenuKey + `\command`, "/ve", "/t", "REG_SZ",
+			"/d", fmt.Sprintf(`"%s" --gui "%%1"`, exe), "/f",
+		},
 	}
 }
 

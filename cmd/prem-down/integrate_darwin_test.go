@@ -21,7 +21,7 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	}
 	bundle := filepath.Join(home, "Library", "Services", quickActionMenuTitle+".workflow")
 
-	info, err := os.ReadFile(filepath.Join(bundle, "Contents", "Info.plist"))
+	info, err := os.ReadFile(filepath.Join(bundle, "Contents", "Info.plist")) //nolint:gosec // G304: path is built from test-controlled constants
 	if err != nil {
 		t.Fatalf("Info.plist not written: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 		}
 	}
 
-	doc, err := os.ReadFile(filepath.Join(bundle, "Contents", "document.wflow"))
+	doc, err := os.ReadFile(filepath.Join(bundle, "Contents", "document.wflow")) //nolint:gosec // G304: path is built from test-controlled constants
 	if err != nil {
 		t.Fatalf("document.wflow not written: %v", err)
 	}
