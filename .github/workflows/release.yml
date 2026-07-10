@@ -28,8 +28,7 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          # TEMPORARY: --skip=winget. Remove to enable winget publishing.
-          args: release --clean --skip=winget
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
