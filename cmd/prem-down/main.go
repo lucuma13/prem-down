@@ -20,6 +20,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"fmt"
@@ -146,8 +147,23 @@ var reconstructClassOverrides = map[classField]string{
 
 var classIDRe = regexp.MustCompile(`\bClassID="([^"]+)"`)
 
+// guiMode is set by --gui, passed by the OS context-menu wiring (see
+// integrate.go): the shell opens a console window that closes the instant the
+// process exits, so wait for Enter before exiting to keep the result
+// readable. Not shown in --help; it is plumbing, not a user-facing option.
+var guiMode bool
+
+func pauseIfGUI() {
+	if !guiMode {
+		return
+	}
+	fmt.Fprint(os.Stderr, "\nPress Enter to close this window...")
+	_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
+}
+
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	pauseIfGUI()
 	os.Exit(1)
 }
 
@@ -567,6 +583,7 @@ func downgrade(src, dst string, projectVersion int, verbose bool) {
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [--to RELEASE]
+       prem-down integrate [--remove]
 
 Downgrade a Premiere Pro project to open with an older version, save next to original project.
 
@@ -575,17 +592,28 @@ Options:
   -v, --verbose   print what was changed
       --version   show version and exit
   -h, --help      show this help
+
+Subcommands:
+  integrate       add a right-click "Downgrade for older Premiere" action to
+                  Finder/Explorer (--remove undoes it)
 `, releaseExamples())
 }
 
 func main() {
+	args := os.Args[1:]
+	// Subcommand dispatch happens before the update notifier: integrate runs
+	// from installer hooks, where an update hint would only be noise.
+	if len(args) > 0 && args[0] == "integrate" {
+		integrateMain(args[1:])
+		return
+	}
+
 	updates := newUpdateNotifier(version)
 	updates.start()
 
 	var positionals []string
 	to := "" // empty => auto: one release below the source
 	verbose := false
-	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -606,6 +634,8 @@ func main() {
 			to = strings.TrimPrefix(a, "--to=")
 		case a == "-v" || a == "--verbose":
 			verbose = true
+		case a == "--gui":
+			guiMode = true
 		case strings.HasPrefix(a, "-") && a != "-":
 			usage(os.Stderr)
 			fatal("error: unknown option %s", a)
@@ -635,4 +665,5 @@ func main() {
 	dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
 	downgrade(input, dst, targetVersion, verbose)
 	updates.notify(updateNotifyTimeout)
+	pauseIfGUI()
 }

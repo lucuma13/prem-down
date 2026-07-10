@@ -62,6 +62,60 @@ jobs:
         uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
         with:
           advanced-security: false
+  installer:
+    name: Windows installer check
+    needs: [lint, audit]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build MSI
+        shell: bash
+        run: |
+          go build -o dist/prem-down.exe ./cmd/prem-down
+          dotnet tool install --global wix --version "7.*"
+          wix eula accept wix7
+          wix build packaging/windows/prem-down.wxs -arch x64 \
+            -d Version=0.0.1 -d ExeDir=dist -o prem-down.msi
+      - name: Install MSI and verify
+        shell: pwsh
+        run: |
+          $p = Start-Process msiexec -ArgumentList '/i','prem-down.msi','/qn' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /i exited with $($p.ExitCode)" }
+          $exe = 'C:\Program Files\prem-down\prem-down.exe'
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'installed exe does not run' }
+          reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down\command'
+          if ($LASTEXITCODE -ne 0) { throw 'context-menu registry key missing after install' }
+      - name: Exercise integrate subcommand (HKCU wiring)
+        shell: pwsh
+        run: |
+          $exe = 'C:\Program Files\prem-down\prem-down.exe'
+          & $exe integrate
+          if ($LASTEXITCODE -ne 0) { throw 'integrate failed' }
+          reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down\command'
+          if ($LASTEXITCODE -ne 0) { throw 'HKCU context-menu key missing after integrate' }
+          & $exe integrate --remove
+          if ($LASTEXITCODE -ne 0) { throw 'integrate --remove failed' }
+          reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'HKCU context-menu key still present after --remove' }
+      - name: Uninstall MSI and verify cleanup
+        shell: pwsh
+        run: |
+          $p = Start-Process msiexec -ArgumentList '/x','prem-down.msi','/qn' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited with $($p.ExitCode)" }
+          if (Test-Path 'C:\Program Files\prem-down\prem-down.exe') { throw 'exe still present after uninstall' }
+          reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'context-menu registry key still present after uninstall' }
   test:
     name: Tests (${{ matrix.os }})
     needs: [lint, audit]

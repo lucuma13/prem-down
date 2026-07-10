@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer for prem-down, built with WiX (v4+ schema) by the
+  windows-installer job in release.yml:
+
+    wix build packaging/windows/prem-down.wxs -arch x64 \
+      -d Version=<x.y.z> -d ExeDir=<dir containing prem-down.exe> \
+      -o prem-down_windows_amd64.msi
+
+  It installs the exe to Program Files, puts it on the system PATH, and adds
+  the Explorer right-click entry for .prproj files - the same entry
+  "prem-down integrate" writes, but under HKLM so it applies to all users and
+  is removed by uninstall. Per-machine scope: winget elevates as needed.
+
+  The UpgradeCode must NEVER change: it is how newer MSIs find and replace
+  older installs. The ProductCode is regenerated on every build (MajorUpgrade
+  handles replacement), and the release job reads it out of the built MSI for
+  the winget manifest.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="prem-down"
+           Manufacturer="lucuma13"
+           Version="$(var.Version)"
+           UpgradeCode="596A17E3-959D-4A30-B125-788043C7487E"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="Downgrade Premiere Pro project files so older versions can open them" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of prem-down is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="prem-down">
+
+        <Component Id="MainExecutable">
+          <File Id="PremDownExe" Source="$(var.ExeDir)/prem-down.exe" />
+        </Component>
+
+        <!-- Environment can't be a KeyPath, so a marker registry value
+             anchors the component. -->
+        <Component Id="PathEnvironment">
+          <RegistryValue Root="HKLM" Key="Software\lucuma13\prem-down"
+                         Name="InstallFolder" Type="string"
+                         Value="[INSTALLFOLDER]" KeyPath="yes" />
+          <Environment Id="PremDownPath" Name="PATH" Value="[INSTALLFOLDER]"
+                       Permanent="no" Part="last" Action="set" System="yes" />
+        </Component>
+
+        <!-- Mirrors contextMenuRegAdds in integrate_windows.go (which writes
+             HKCU for portable installs); keep the two in sync. -->
+        <Component Id="ContextMenu">
+          <RegistryKey Root="HKLM"
+                       Key="SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down">
+            <RegistryValue Type="string"
+                           Value="Downgrade for older Premiere" KeyPath="yes" />
+            <RegistryValue Type="string" Name="Icon"
+                           Value="[INSTALLFOLDER]prem-down.exe" />
+            <RegistryKey Key="command">
+              <RegistryValue Type="string"
+                             Value="&quot;[INSTALLFOLDER]prem-down.exe&quot; --gui &quot;%1&quot;" />
+            </RegistryKey>
+          </RegistryKey>
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+  </Package>
+</Wix>

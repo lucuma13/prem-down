@@ -28,8 +28,89 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --skip=winget
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+  # winget ships an MSI rather than the bare zip so the Explorer context menu,
+  # PATH entry and uninstaller come with the package. GoReleaser cannot build
+  # MSIs, so this job picks up where it left off: it wraps the released
+  # Windows binary with WiX (packaging/windows/prem-down.wxs), publishes the
+  # MSI as a release asset (also the direct-download path for editors without
+  # winget), and opens the manifest PR against microsoft/winget-pkgs.
+  windows-installer:
+    name: Windows installer
+    needs: [release]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download released Windows binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --pattern "prem-down_windows_amd64.zip"
+          unzip prem-down_windows_amd64.zip -d dist
+      - name: Build MSI
+        shell: bash
+        run: |
+          dotnet tool install --global wix --version "7.*"
+          wix eula accept wix7
+          # MSI ProductVersion must be numeric x.y.z; tags may be shorter (0.4).
+          IFS=. read -r major minor patch _ <<<"$TAG"
+          wix build packaging/windows/prem-down.wxs -arch x64 \
+            -d Version="${major:-0}.${minor:-0}.${patch:-0}" -d ExeDir=dist \
+            -o prem-down_windows_amd64.msi
+      - name: Upload MSI to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" prem-down_windows_amd64.msi
+      - name: Read ProductCode from the MSI
+        shell: pwsh
+        run: |
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @("$PWD\prem-down_windows_amd64.msi", 0))
+          $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @("SELECT Value FROM Property WHERE Property='ProductCode'"))
+          $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+          $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+          $productCode = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
+          if (-not $productCode) { throw 'ProductCode not found in MSI' }
+          "PRODUCT_CODE=$productCode" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Open winget-pkgs pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+        run: |
+          sha256=$(sha256sum prem-down_windows_amd64.msi | cut -d' ' -f1)
+          gh repo sync lucuma13/winget-pkgs --source microsoft/winget-pkgs
+          gh auth setup-git
+          git clone --depth=1 --filter=blob:none --sparse \
+            https://github.com/lucuma13/winget-pkgs wp
+          cd wp
+          git sparse-checkout set "manifests/l/lucuma13/prem-down"
+          dest="manifests/l/lucuma13/prem-down/$TAG"
+          mkdir -p "$dest"
+          for f in ../packaging/winget/*.yaml; do
+            sed -e "s/__VERSION__/$TAG/g" \
+                -e "s/__SHA256__/$sha256/g" \
+                -e "s/__PRODUCT_CODE__/$PRODUCT_CODE/g" \
+                "$f" > "$dest/$(basename "$f")"
+          done
+          git config user.name "goreleaser-bot"
+          git config user.email "goreleaser-bot@users.noreply.github.com"
+          git checkout -b "prem-down-$TAG"
+          git add "$dest"
+          git commit -m "New version: lucuma13.prem-down version $TAG"
+          git push origin "prem-down-$TAG"
+          gh pr create --repo microsoft/winget-pkgs \
+            --head "lucuma13:prem-down-$TAG" \
+            --title "New version: lucuma13.prem-down version $TAG" \
+            --body "Automated submission from https://github.com/lucuma13/prem-down/releases/tag/$TAG"

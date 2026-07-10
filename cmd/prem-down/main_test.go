@@ -139,7 +139,7 @@ func TestUsage(t *testing.T) {
 	got := b.String()
 	// The help must name the tool, the --to option, and give live release
 	// examples (so a stale hard-coded list can't silently drift from releases).
-	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", releaseExamples()} {
+	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", "integrate", releaseExamples()} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() output missing %q:\n%s", want, got)
 		}

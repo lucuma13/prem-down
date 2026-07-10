@@ -32,9 +32,13 @@ changelog:
 # sha256s matching this release) and pushes it to the lucuma13/homebrew-dit
 # tap.
 #
-# A cask (not a formula) is used because Homebrew now steers pre-built binaries
+# A cask (not a formula) is used because Homebrew steers pre-built binaries
 # to casks. The postflight hook strips the com.apple.quarantine attribute so
-# the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run.
+# the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run,
+# then installs the Finder Quick Action ("prem-down integrate") so editors get
+# the right-click action without touching a terminal. The uninstall preflight
+# removes the Quick Action while the binary is still staged; it must never
+# fail, or it would wedge `brew uninstall`.
 homebrew_casks:
   - name: prem-down
     repository:
@@ -54,29 +58,15 @@ homebrew_casks:
         install: |
           if OS.mac? && File.exist?("#{staged_path}/prem-down")
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/prem-down"]
+            system_command "#{staged_path}/prem-down", args: ["integrate"]
           end
-# winget: GoReleaser generates the manifest from the Windows zip archive and
-# opens a pull request against microsoft/winget-pkgs
-winget:
-  - name: prem-down
-    publisher: lucuma13
-    license: MIT
-    homepage: "https://github.com/lucuma13/prem-down"
-    short_description: "Downgrade Premiere Pro project files so older versions can open them"
-    package_identifier: lucuma13.prem-down
-    commit_author:
-      name: goreleaser-bot
-      email: goreleaser-bot@users.noreply.github.com
-    commit_msg_template: "prem-down: update to {{ .Tag }}"
-    repository:
-      owner: lucuma13
-      name: winget-pkgs
-      branch: "prem-down-{{ .Version }}"
-      token: "{{ .Env.WINGET_PKGS_TOKEN }}"
-      pull_request:
-        enabled: true
-        draft: false
-        base:
-          owner: microsoft
-          name: winget-pkgs
-          branch: master
+      pre:
+        uninstall: |
+          if OS.mac? && File.exist?("#{staged_path}/prem-down")
+            system_command "#{staged_path}/prem-down", args: ["integrate", "--remove"], must_succeed: false
+          end
+# winget is NOT published from here: winget ships an MSI (so the Explorer
+# context menu installs/uninstalls with the package), which GoReleaser cannot
+# build. The windows-installer job in release.yml builds the MSI with WiX from
+# packaging/windows/prem-down.wxs, uploads it to the GitHub release, and opens
+# the manifest PR against microsoft/winget-pkgs from packaging/winget/.
