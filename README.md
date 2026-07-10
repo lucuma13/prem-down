@@ -1,4 +1,4 @@
-# prem-down
+# <img src="docs/assets/prem-down.svg" width="30" height="30" align="absbottom"/> prem-down
 
 ![OS](https://img.shields.io/badge/OS-macOS%20%7C%20Windows-lightgrey)
 [![CI](https://github.com/lucuma13/prem-down/actions/workflows/ci.yml/badge.svg)](https://github.com/lucuma13/prem-down/actions/workflows/ci.yml)
