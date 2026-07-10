@@ -601,15 +601,10 @@ Subcommands:
 
 func main() {
 	args := os.Args[1:]
-	// Subcommand dispatch happens before the update notifier: integrate runs
-	// from installer hooks, where an update hint would only be noise.
 	if len(args) > 0 && args[0] == "integrate" {
 		integrateMain(args[1:])
 		return
 	}
-
-	updates := newUpdateNotifier(version)
-	updates.start()
 
 	var positionals []string
 	to := "" // empty => auto: one release below the source
@@ -622,7 +617,6 @@ func main() {
 			return
 		case a == "--version":
 			fmt.Printf("prem-down %s\n", version)
-			updates.notify(updateNotifyTimeout)
 			return
 		case a == "--to":
 			i++
@@ -664,6 +658,5 @@ func main() {
 	ext := filepath.Ext(input)
 	dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
 	downgrade(input, dst, targetVersion, verbose)
-	updates.notify(updateNotifyTimeout)
 	pauseIfGUI()
 }
