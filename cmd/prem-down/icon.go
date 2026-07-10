@@ -7,7 +7,7 @@
 // into windows/amd64 builds automatically; other platforms ignore it via the
 // _windows_amd64 filename suffix, so macOS builds and `go test` are untouched.
 // The .syso is committed so GoReleaser needs no extra build step, but it is
-// generated from the PNGs in packaging/windows/winres/. Regenerate it after
+// generated from the PNG files in packaging/windows/winres/. Regenerate it after
 // changing the artwork with:
 //
 //	go generate ./cmd/prem-down
