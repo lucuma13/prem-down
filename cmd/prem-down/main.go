@@ -350,16 +350,19 @@ func leaf(tag, value string) *el {
 // Order is deliberately NOT changed: these classes are read by name, so field
 // order is irrelevant. Existing fields are left exactly where Premiere wrote
 // them; we only append the handful of missing leaves before the closing tag.
-func rebuild(e *el, stats map[fieldKey]int) {
+//
+// It returns the exact number of bytes the insertions add when rendered, so
+// the caller can verify that rendering changed nothing else.
+func rebuild(e *el, stats map[fieldKey]int) (insertedBytes int) {
 	for _, child := range e.children() {
-		rebuild(child, stats)
+		insertedBytes += rebuild(child, stats)
 	}
 	if e.selfClosing {
-		return
+		return insertedBytes
 	}
 	fields, ok := reconstructFieldsByTag[e.tag]
 	if !ok {
-		return
+		return insertedBytes
 	}
 
 	presentEls := map[string]*el{}
@@ -398,7 +401,7 @@ func rebuild(e *el, stats map[fieldKey]int) {
 	}
 
 	if len(missing) == 0 {
-		return // leave content untouched -> byte-identical to what Premiere wrote
+		return insertedBytes // leave content untouched -> byte-identical to what Premiere wrote
 	}
 
 	content := e.content
@@ -411,11 +414,15 @@ func rebuild(e *el, stats map[fieldKey]int) {
 	}
 	for _, l := range missing {
 		content = append(content, sep, l)
+		var lb strings.Builder
+		l.render(&lb)
+		insertedBytes += len(sep) + lb.Len()
 	}
 	if trailing != "" {
 		content = append(content, trailing)
 	}
 	e.content = content
+	return insertedBytes
 }
 
 // reconstructPositionalClasses rebuilds each reconstruct class so every field
@@ -442,22 +449,79 @@ func reconstructPositionalClasses(xml string) (string, map[fieldKey]int, error) 
 			}
 			var b strings.Builder
 			b.Grow(len(m) + 256)
+			regionInserted := 0
 			for _, r := range roots {
 				switch v := r.(type) {
 				case string:
 					b.WriteString(v)
 				case *el:
-					rebuild(v, stats)
+					regionInserted += rebuild(v, stats)
 					v.render(&b)
 				}
 			}
-			return b.String()
+			out := b.String()
+			// Render-fidelity guard: parsing then rendering this class instance
+			// must reproduce the original bytes exactly, save for the leaves we
+			// deliberately appended. With no insertion the output must be
+			// byte-identical to the input; otherwise it must be longer by
+			// precisely the bytes rebuild reports adding. Any other delta means
+			// the parse/render round-trip dropped, moved, or mangled bytes, so we
+			// abort the whole file.
+			if regionInserted == 0 {
+				if out != m {
+					parseErr = fmt.Errorf("render fidelity: <%s> instance changed with no field inserted", c.tag)
+					return m
+				}
+			} else if len(out) != len(m)+regionInserted {
+				parseErr = fmt.Errorf("render fidelity: <%s> instance grew by %d bytes, expected %d",
+					c.tag, len(out)-len(m), regionInserted)
+				return m
+			}
+			return out
 		})
 		if parseErr != nil {
 			return "", nil, parseErr
 		}
 	}
 	return xml, stats, nil
+}
+
+// verifyDowngraded is the self-check run on the finished document before it is
+// written. It refuses (returns an error, so nothing is written) unless every
+// invariant a correct downgrade must satisfy holds:
+//
+//   - the stamped <Project> version reads back as the requested target, and
+//   - a second reconstruction pass is a no-op: it parses cleanly, its
+//     render-fidelity guard passes on every class instance, it inserts no field
+//     (every reconstruct class already carries all fields 2025 requires), and it
+//     renders byte-for-byte identical output.
+//
+// Reaching a fixpoint is the whole invariant: if a second pass would add a
+// field, the first pass left one missing; if it would render different bytes,
+// the round-trip is lossy. Either way this turns a would-be silent corruption
+// into a hard refusal — the guarantee TestDowngrade2026Fixture asserts, applied
+// to every file a user actually downgrades rather than only to the fixture.
+func verifyDowngraded(xml string, wantVersion int) error {
+	got, err := getProjectVersion(xml)
+	if err != nil {
+		return fmt.Errorf("verify: %w", err)
+	}
+	if got != wantVersion {
+		return fmt.Errorf("verify: output <Project> version is %d, want %d", got, wantVersion)
+	}
+	reXML, stats, err := reconstructPositionalClasses(xml)
+	if err != nil {
+		return fmt.Errorf("verify: re-parse of the output failed: %w", err)
+	}
+	if reXML != xml {
+		return fmt.Errorf("verify: a second reconstruction pass changed the output; the first pass was not a fixpoint")
+	}
+	for k, n := range stats {
+		if n > 0 {
+			return fmt.Errorf("verify: reconstruction still inserted %s/%s (%dx); required fields were missing after downgrade", k.tag, k.field, n)
+		}
+	}
+	return nil
 }
 
 // projectVersionRe matches the top-level project tag. It bakes in Premiere's
@@ -598,6 +662,13 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 				"only re-gating <Project> version\n", sourceVersion, lastDenseSerialisationProjectVersion)
 		}
 		fmt.Printf("  set Project version -> %d\n", projectVersion)
+	}
+
+	// Prove the transform before committing it to disk: re-gated version, every
+	// reconstruct class complete, parse/render round-trip lossless. A failure
+	// here means we would otherwise write a corrupt project, so refuse instead.
+	if err := verifyDowngraded(xml, projectVersion); err != nil {
+		return err
 	}
 
 	var out bytes.Buffer
