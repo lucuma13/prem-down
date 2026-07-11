@@ -26,6 +26,8 @@ brew tap lucuma13/dit
 brew install prem-down
 ```
 
+3. Check that the action is now available when right-clicking a `.prproj` file, under "Quick Actions > Downgrade for older Premiere". If it isn't, switch it on manually with "Quick Actions > Customise…"
+
 #### Windows
 
 Download the installer from [here](https://github.com/lucuma13/prem-down/releases/latest) and open it (Windows will warn about an unknown publisher, choose "More info" > "Run anyway"). Alternatively, install from Terminal:
