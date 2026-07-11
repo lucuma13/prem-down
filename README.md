@@ -56,9 +56,9 @@ If the action is ever missing (or you want to remove it before uninstalling), ma
 prem-down integrate           # add the right-click action
 prem-down integrate --remove  # remove it
 ```
-To uninstall, run this command on Terminal: 
+To uninstall, run this command on Terminal:
 ```sh
-prem-down integrate --remove && rm /usr/local/bin/prem-down
+prem-down integrate --remove && rm -f /usr/local/bin/prem-down
 ```
 
 
