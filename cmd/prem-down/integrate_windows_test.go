@@ -111,7 +111,7 @@ func TestDropTargetServerSurvivesRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "-test.run=^TestDropTargetServerHelper$", "-test.v")
+	cmd := exec.Command(exe, "-test.run=^TestDropTargetServerHelper$", "-test.v") //nolint:gosec // G204: exe is os.Executable(), this test binary re-invoking itself, not external input
 	cmd.Env = append(os.Environ(), "PREM_DOWN_COM_HELPER=1")
 	// No console window for the child: runDropTargetServer hides its console,
 	// and without this it would inherit — and hide — the developer's terminal.
