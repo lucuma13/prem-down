@@ -606,8 +606,8 @@ Options:
 
 Subcommands:
   integrate       add a right-click "Downgrade for older Premiere" action to
-                  Finder/Explorer (--remove undoes it)
-`, releaseExamples())
+                  %s (--remove undoes it)
+`, releaseExamples(), fileManagerName)
 }
 
 func main() {

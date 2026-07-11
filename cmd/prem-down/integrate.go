@@ -4,7 +4,8 @@
 //
 //   - macOS: installs a Finder Quick Action into ~/Library/Services
 //     (integrate_darwin.go). The Homebrew cask runs this automatically after
-//     install and removes it before uninstall.
+//     install and removes it before uninstall; the .pkg installer's postinstall
+//     runs it too, as the logged-in user (packaging/macos/scripts/postinstall).
 //   - Windows: adds a context-menu entry for .prproj files under HKCU
 //     (integrate_windows.go). The MSI installer ships equivalent HKLM keys, so
 //     this is only needed for portable installs.
@@ -22,15 +23,15 @@ import (
 )
 
 func usageIntegrate(w io.Writer) {
-	_, _ = fmt.Fprint(w, `Usage: prem-down integrate [--remove]
+	_, _ = fmt.Fprintf(w, `Usage: prem-down integrate [--remove]
 
 Add a right-click "Downgrade for older Premiere" action for .prproj files
-(a Finder Quick Action on macOS, an Explorer context-menu entry on Windows).
+(%s).
 
 Options:
       --remove    remove the right-click action instead
   -h, --help      show this help
-`)
+`, integrationKind)
 }
 
 func integrateMain(args []string) {

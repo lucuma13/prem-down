@@ -44,6 +44,9 @@ const (
 	// makes AppKit treat it as a template image (tinted to match the OS).
 	quickActionIconName = "workflowCustomImageTemplate"
 
+	fileManagerName = "Finder"
+	integrationKind = "a Finder Quick Action"
+
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file and pick
 Quick Actions > ` + quickActionMenuTitle + `.
 If it doesn't appear, enable it with Quick Actions > Customise…`

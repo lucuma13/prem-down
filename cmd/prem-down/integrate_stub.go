@@ -10,6 +10,8 @@ package main
 import "errors"
 
 const (
+	fileManagerName             = "your file manager"
+	integrationKind             = "a file-manager entry"
 	integrationInstalledMessage = ""
 	integrationRemovedMessage   = ""
 )

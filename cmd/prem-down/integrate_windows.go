@@ -23,9 +23,12 @@ const (
 	contextMenuKey   = `HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down`
 	contextMenuTitle = "Downgrade for older Premiere"
 
-	integrationInstalledMessage = `Installed the Explorer context-menu entry: right-click a .prproj file and
+	fileManagerName = "File Explorer"
+	integrationKind = "a File Explorer context-menu entry"
+
+	integrationInstalledMessage = `Installed the File Explorer context-menu entry: right-click a .prproj file and
 pick "` + contextMenuTitle + `".`
-	integrationRemovedMessage = "Removed the Explorer context-menu entry."
+	integrationRemovedMessage = "Removed the File Explorer context-menu entry."
 )
 
 // contextMenuRegAdds returns the reg.exe argument lists that create the
