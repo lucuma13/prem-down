@@ -147,10 +147,13 @@ var (
 	procTranslateMessage   = moduser32.NewProc("TranslateMessage")
 	procDispatchMessageW   = moduser32.NewProc("DispatchMessageW")
 	procPostThreadMessageW = moduser32.NewProc("PostThreadMessageW")
-	procGetCurrentThreadID = moduser32.NewProc("GetCurrentThreadId")
 	procShowWindow         = moduser32.NewProc("ShowWindow")
 
-	procGetConsoleWindow = modkernel32.NewProc("GetConsoleWindow")
+	// GetCurrentThreadId lives in kernel32 (not user32, where the other
+	// thread-message procs come from); LazyProc panics at call time if the
+	// name is looked up in the wrong DLL.
+	procGetCurrentThreadID = modkernel32.NewProc("GetCurrentThreadId")
+	procGetConsoleWindow   = modkernel32.NewProc("GetConsoleWindow")
 )
 
 // ptr converts a Go pointer to the uintptr a syscall argument list wants. It is
@@ -544,9 +547,12 @@ func maybeRunCOMServer(args []string) bool {
 
 // hasEmbeddingArg reports whether COM launched us for activation: it appends
 // "-Embedding" (older shells use "/Embedding") to the LocalServer32 command.
+// The switch prefix is required — a bare "Embedding" is a plausible filename
+// and must be treated as an ordinary positional argument.
 func hasEmbeddingArg(args []string) bool {
 	for _, a := range args {
-		if strings.EqualFold(strings.TrimLeft(a, "-/"), "Embedding") {
+		if (strings.HasPrefix(a, "-") || strings.HasPrefix(a, "/")) &&
+			strings.EqualFold(strings.TrimLeft(a, "-/"), "Embedding") {
 			return true
 		}
 	}
