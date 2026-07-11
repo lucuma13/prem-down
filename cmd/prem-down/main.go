@@ -40,10 +40,7 @@ import (
 // -ldflags "-X main.version=1.2.3"
 var version = "0.1"
 
-const (
-	minConvertibleProjectVersion         = 22 // Premiere Pro 2025 converter floor
-	lastDenseSerialisationProjectVersion = 43 // sources above it need field re-insertion
-)
+const lastDenseSerialisationProjectVersion = 43 // sources above it need field re-insertion
 
 // Map of Premiere release -> the XML <Project> Version that release uses
 // natively.
@@ -230,22 +227,18 @@ func previousRelease(v int) (xmlProjectVersion int, name string, ok bool) {
 	return
 }
 
-// warnTarget prints the same downgrade caveats whether the target was chosen
-// explicitly (--to) or derived as the previous release.
-func warnTarget(version int) {
-	if version < minConvertibleProjectVersion {
-		fmt.Fprintf(os.Stderr,
-			"warning: project version %d is below converter floor (%d); "+
-				"newer Premiere may report it as damaged (it should still open in its own "+
-				"native release).\n", version, minConvertibleProjectVersion)
-	}
-}
-
 // --------------------------------------------------------------------------
 // Formatting-preserving mini-DOM, used only to rebuild the reconstruct
 // classes. Each element keeps its exact opening tag and a content list (raw
 // text + child elements), so re-serialising an untouched node is
 // byte-identical to the input.
+//
+// This is NOT a general XML parser; it leans on the shapes Premiere's
+// serialiser actually emits. In particular it assumes no raw '>' inside
+// attribute values (legal XML, but Premiere escapes it) and no CDATA
+// sections. A document that breaks those assumptions mis-tokenises and
+// surfaces as an unbalanced/mismatched-XML error for that file — never as a
+// silently corrupted output.
 // --------------------------------------------------------------------------
 
 type el struct {
@@ -288,7 +281,7 @@ var (
 	tagNameRe = regexp.MustCompile(`^<([\w.\-]+)`)
 )
 
-func parseXML(s string) []any {
+func parseXML(s string) ([]any, error) {
 	var roots []any
 	var stack []*el
 	appendItem := func(item any) {
@@ -311,11 +304,11 @@ func parseXML(s string) []any {
 			appendItem(tok)
 		case strings.HasPrefix(tok, "</"):
 			if len(stack) == 0 {
-				fatal("error: unbalanced XML near %q", tok)
+				return nil, fmt.Errorf("unbalanced XML near %q", tok)
 			}
 			top := stack[len(stack)-1]
 			if name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tok, "</"), ">")); name != top.tag {
-				fatal("error: mismatched XML: %q closes <%s>", tok, top.tag)
+				return nil, fmt.Errorf("mismatched XML: %q closes <%s>", tok, top.tag)
 			}
 			stack = stack[:len(stack)-1]
 			top.closeTag = tok
@@ -336,9 +329,9 @@ func parseXML(s string) []any {
 		appendItem(s[pos:])
 	}
 	if len(stack) > 0 {
-		fatal("error: unbalanced XML: <%s> never closed", stack[len(stack)-1].tag)
+		return nil, fmt.Errorf("unbalanced XML: <%s> never closed", stack[len(stack)-1].tag)
 	}
-	return roots
+	return roots, nil
 }
 
 func leaf(tag, value string) *el {
@@ -428,16 +421,25 @@ func rebuild(e *el, stats map[fieldKey]int) {
 // reconstructPositionalClasses rebuilds each reconstruct class so every field
 // required is present. Operates on one class instance at a time (they
 // don't self-nest) to avoid parsing the whole multi-hundred-MB document at
-// once.
-func reconstructPositionalClasses(xml string) (string, map[fieldKey]int) {
+// once. A malformed instance is reported as an error for the whole file (the
+// input is corrupt); the caller treats it per-file so a batch keeps going.
+func reconstructPositionalClasses(xml string) (string, map[fieldKey]int, error) {
 	stats := map[fieldKey]int{}
 	for _, c := range reconstructFields {
 		// The Python original uses <tag(?=[ >]); RE2 has no lookahead, but a
 		// definition tag always carries attributes (Version= at minimum), so a
 		// whitespace char after the name is equivalent.
 		re := regexp.MustCompile(`(?s)<` + c.tag + `[ \t\r\n][^>]*\bVersion="\d+"[^>]*>.*?</` + c.tag + `>`)
+		var parseErr error
 		xml = re.ReplaceAllStringFunc(xml, func(m string) string {
-			roots := parseXML(m)
+			if parseErr != nil {
+				return m
+			}
+			roots, err := parseXML(m)
+			if err != nil {
+				parseErr = err
+				return m
+			}
 			var b strings.Builder
 			b.Grow(len(m) + 256)
 			for _, r := range roots {
@@ -451,36 +453,46 @@ func reconstructPositionalClasses(xml string) (string, map[fieldKey]int) {
 			}
 			return b.String()
 		})
+		if parseErr != nil {
+			return "", nil, parseErr
+		}
 	}
-	return xml, stats
+	return xml, stats, nil
 }
 
+// projectVersionRe matches the top-level project tag. It bakes in Premiere's
+// stable attribute order: ObjectID="1" is written before Version= in the
+// <Project> tag (true of every release in the version map). If Adobe ever
+// reordered those attributes this would stop matching and the file would be
+// reported as unrecognised — a hard refusal, never a silent mis-rewrite.
 var projectVersionRe = regexp.MustCompile(`(<Project ObjectID="1"[^>]*\bVersion=")(\d+)(")`)
 
-func setProjectVersion(xml string, version int) string {
+func setProjectVersion(xml string, version int) (string, error) {
 	n := len(projectVersionRe.FindAllStringIndex(xml, -1))
 	if n != 1 {
-		fatal(`error: expected exactly one <Project ObjectID="1"> tag, found %d`, n)
+		return "", fmt.Errorf(`expected exactly one <Project ObjectID="1"> tag, found %d`, n)
 	}
-	return projectVersionRe.ReplaceAllString(xml, fmt.Sprintf("${1}%d${3}", version))
+	return projectVersionRe.ReplaceAllString(xml, fmt.Sprintf("${1}%d${3}", version)), nil
 }
 
-func getProjectVersion(xml string) int {
+func getProjectVersion(xml string) (int, error) {
 	m := projectVersionRe.FindStringSubmatch(xml)
 	if m == nil {
-		fatal(`error: could not find the <Project ObjectID="1"> version`)
+		return 0, fmt.Errorf(`could not find the <Project ObjectID="1"> version`)
 	}
 	v, err := strconv.Atoi(m[2])
 	if err != nil {
-		fatal("error: invalid <Project> version %q", m[2])
+		return 0, fmt.Errorf("invalid <Project> version %q", m[2])
 	}
-	return v
+	return v, nil
 }
 
 // uniquePath returns path if free, else the same name with a -1/-2/-3...
 // suffix. Only a successful Stat counts as taken: any Stat error (not just
 // not-exist) treats the path as free, so an unreadable directory surfaces as
-// a write error later instead of looping here forever.
+// a write error later instead of looping here forever. This check is
+// advisory — the O_EXCL open in downgrade is what actually guarantees no
+// existing file is overwritten if something claims the name in between.
 func uniquePath(path string) string {
 	taken := func(p string) bool {
 		_, err := os.Stat(p) //nolint:gosec // G703: p derives from a user-supplied CLI path; stat-ing it is the tool's purpose
@@ -501,10 +513,9 @@ func uniquePath(path string) string {
 
 // downgrade converts one project file and returns an error rather than exiting,
 // so a caller processing several files can report a failure and move on to the
-// rest. The returned errors are operational (unreadable/unrecognised file,
-// out-of-range target, write failure); genuinely malformed XML still fails hard
-// inside the structural helpers (getProjectVersion, parseXML), since that means
-// a corrupt input rather than an ordinary skip.
+// rest. Every failure is per-file — operational ones (unreadable file,
+// out-of-range target, write failure) and genuinely malformed XML alike — so
+// one corrupt project in a batch never aborts the remaining files.
 func downgrade(src, dst string, projectVersion int, verbose bool) error {
 	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
 	if err != nil {
@@ -528,7 +539,10 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 		return fmt.Errorf("does not look like a Premiere project")
 	}
 
-	sourceVersion := getProjectVersion(xml)
+	sourceVersion, err := getProjectVersion(xml)
+	if err != nil {
+		return err
+	}
 
 	// This is a downgrader: an explicit --to at or above the source release is
 	// almost certainly user error, so refuse rather than stamp a higher version.
@@ -550,15 +564,20 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 			fmt.Printf("  auto target: source version %d -> %s (version %d)\n",
 				sourceVersion, name, pv)
 		}
-		warnTarget(projectVersion)
 	}
 
 	needsNormalize := sourceVersion > lastDenseSerialisationProjectVersion
 	stats := map[fieldKey]int{}
 	if needsNormalize {
-		xml, stats = reconstructPositionalClasses(xml)
+		xml, stats, err = reconstructPositionalClasses(xml)
+		if err != nil {
+			return err
+		}
 	}
-	xml = setProjectVersion(xml, projectVersion)
+	xml, err = setProjectVersion(xml, projectVersion)
+	if err != nil {
+		return err
+	}
 	if verbose {
 		if needsNormalize {
 			keys := make([]fieldKey, 0, len(stats))
@@ -589,7 +608,17 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 	if err := zw.Close(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dst, out.Bytes(), 0o644); err != nil { //nolint:gosec // G306: output is a project file meant to be opened/shared; 0644 is deliberate
+	// O_EXCL: uniquePath picked a free name, but something else may have
+	// claimed it since; fail with "file exists" rather than overwrite it.
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302,G304: dst sits next to the user-supplied input; the output is a project file meant to be opened/shared, so 0644 is deliberate
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(out.Bytes()); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s\n", dst)
@@ -625,7 +654,7 @@ func main() {
 func run(args []string) int {
 	// When Explorer activates prem-down as the Drop Target COM server (Windows
 	// only; "-Embedding"), it takes over completely: it collects the selected
-	// files and relaunches prem-down --gui on them. See droptarget_windows.go.
+	// files and relaunches prem-down --gui on them. See integrate_windows.go.
 	if maybeRunCOMServer(args) {
 		return 0
 	}
@@ -654,6 +683,9 @@ func run(args []string) int {
 			to = args[i] //nolint:gosec // G602: the i >= len(args) guard above exits via fatal, so i is in range here
 		case strings.HasPrefix(a, "--to="):
 			to = strings.TrimPrefix(a, "--to=")
+			if to == "" {
+				fatal("error: --to requires a value")
+			}
 		case a == "-v" || a == "--verbose":
 			verbose = true
 		case a == "--gui":
@@ -677,7 +709,6 @@ func run(args []string) int {
 	targetVersion := 0
 	if to != "" {
 		targetVersion = resolveRelease(to)
-		warnTarget(targetVersion)
 	}
 
 	// Each file is converted independently: a failure on one is reported and the
