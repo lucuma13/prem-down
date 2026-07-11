@@ -1,10 +1,14 @@
 // macOS implementation of the "integrate" subcommand: a Finder Quick Action.
 //
 // A Quick Action is an Automator .workflow bundle in ~/Library/Services — two
-// plists, no compiled code — so it can be written directly and needs no code
-// signing. Its shell step resolves prem-down through the Homebrew bin dirs at
-// run time (not an absolute Cellar/Caskroom path), so it survives upgrades of
-// the cask untouched.
+// plists plus a template-image TIFF, no compiled code — so it can be written
+// directly and needs no code signing. Its shell step resolves prem-down
+// through the Homebrew bin dirs at run time (not an absolute Cellar/Caskroom
+// path), so it survives upgrades of the cask untouched.
+//
+// NSIconName is resolved against the workflow bundle's own Resources, so a
+// template TIFF named workflowCustomImageTemplate.tiff there is drawn as the
+// menu icon.
 //
 // The service accepts any file (public.data) rather than a .prproj UTI:
 // without Premiere installed the extension maps to a dynamic UTI, and with it
@@ -17,6 +21,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,8 +29,20 @@ import (
 	"strings"
 )
 
+// quickActionIcon is the template TIFF the Quick Action shows in Finder's
+// right-click menu — a committed asset (a multi-resolution, "Template"-named
+// TIFF, so macOS tints it to match native icons).
+//
+//go:embed workflowCustomImageTemplate.tiff
+var quickActionIcon []byte
+
 const (
 	quickActionMenuTitle = "Downgrade for older Premiere"
+
+	// quickActionIconName is the NSIconName value and the basename (minus
+	// extension) of the TIFF in the bundle's Resources. The "Template" suffix
+	// makes AppKit treat it as a template image (tinted to match the OS).
+	quickActionIconName = "workflowCustomImageTemplate"
 
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file and pick
 Quick Actions > ` + quickActionMenuTitle + `.
@@ -74,7 +91,7 @@ const quickActionInfoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 			<key>NSBackgroundSystemColorName</key>
 			<string>systemPurpleColor</string>
 			<key>NSIconName</key>
-			<string>NSActionTemplate</string>
+			<string>` + quickActionIconName + `</string>
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
@@ -340,7 +357,8 @@ func installIntegration() error {
 		return err
 	}
 	contents := filepath.Join(bundle, "Contents")
-	if err := os.MkdirAll(contents, 0o755); err != nil { //nolint:gosec // G301: a Services workflow bundle is world-traversable by convention
+	resources := filepath.Join(contents, "Resources")
+	if err := os.MkdirAll(resources, 0o755); err != nil { //nolint:gosec // G301: a Services workflow bundle is world-traversable by convention
 		return err
 	}
 	document := fmt.Sprintf(quickActionDocumentPlist, xmlTextEscaper.Replace(quickActionScript))
@@ -351,6 +369,10 @@ func installIntegration() error {
 		if err := os.WriteFile(filepath.Join(contents, name), []byte(body), 0o644); err != nil { //nolint:gosec // G306: a Services workflow is world-readable by convention
 			return err
 		}
+	}
+	// The custom menu icon: NSIconName resolves this by basename from Resources.
+	if err := os.WriteFile(filepath.Join(resources, quickActionIconName+".tiff"), quickActionIcon, 0o644); err != nil { //nolint:gosec // G306: a Services workflow resource is world-readable by convention
+		return err
 	}
 	// Best-effort: newly registered Quick Actions default to off, so switch
 	// ours on. If this fails, integrationInstalledMessage documents the manual

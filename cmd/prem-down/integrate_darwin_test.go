@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,10 +61,20 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Info.plist not written: %v", err)
 	}
-	for _, want := range []string{quickActionMenuTitle, "runWorkflowAsService", "NSSendFileTypes"} {
+	for _, want := range []string{quickActionMenuTitle, "runWorkflowAsService", "NSSendFileTypes", quickActionIconName} {
 		if !strings.Contains(string(info), want) {
 			t.Errorf("Info.plist missing %q", want)
 		}
+	}
+
+	// The custom menu icon must be written into Resources under the exact name
+	// NSIconName resolves, with the embedded bytes intact.
+	icon, err := os.ReadFile(filepath.Join(bundle, "Contents", "Resources", quickActionIconName+".tiff")) //nolint:gosec // G304: path is built from test-controlled constants
+	if err != nil {
+		t.Fatalf("icon TIFF not written: %v", err)
+	}
+	if len(icon) == 0 || !bytes.Equal(icon, quickActionIcon) {
+		t.Errorf("icon TIFF mismatch: wrote %d bytes, embedded %d bytes", len(icon), len(quickActionIcon))
 	}
 
 	doc, err := os.ReadFile(filepath.Join(bundle, "Contents", "document.wflow")) //nolint:gosec // G304: path is built from test-controlled constants
