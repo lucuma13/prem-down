@@ -46,6 +46,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      MSI: prem-down_installer_windows_v${{ github.ref_name }}.msi
     steps:
       - name: Checkout source code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,17 +74,17 @@ jobs:
           IFS=. read -r major minor patch _ <<<"$TAG"
           wix build packaging/windows/prem-down.wxs -arch x64 \
             -d Version="${major:-0}.${minor:-0}.${patch:-0}" -d ExeDir=dist \
-            -o prem-down_installer_windows.msi
+            -o "$MSI"
       - name: Upload MSI to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" prem-down_installer_windows.msi
+        run: gh release upload "$TAG" "$MSI"
       - name: Read ProductCode from the MSI
         shell: pwsh
         run: |
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $openArgs = @("$PWD\prem-down_installer_windows.msi", 0)
+          $openArgs = @("$PWD\$env:MSI", 0)
           $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, $openArgs)
           $query = "SELECT Value FROM Property WHERE Property='ProductCode'"
           $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($query))
@@ -97,7 +98,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
         run: |
-          sha256=$(sha256sum prem-down_installer_windows.msi | cut -d' ' -f1)
+          sha256=$(sha256sum "$MSI" | cut -d' ' -f1)
           gh repo sync lucuma13/winget-pkgs --source microsoft/winget-pkgs
           gh auth setup-git
           git clone --depth=1 --filter=blob:none --sparse \
@@ -138,6 +139,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      PKG: prem-down_installer_macos_v${{ github.ref_name }}.pkg
     steps:
       - name: Checkout source code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -173,8 +175,8 @@ jobs:
             --install-location / component.pkg
           productbuild --distribution packaging/macos/distribution.xml \
             --resources packaging/macos/resources \
-            --package-path . prem-down_installer_macos.pkg
+            --package-path . "$PKG"
       - name: Upload .pkg to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" prem-down_installer_macos.pkg
+        run: gh release upload "$TAG" "$PKG"
