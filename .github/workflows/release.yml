@@ -73,17 +73,17 @@ jobs:
           IFS=. read -r major minor patch _ <<<"$TAG"
           wix build packaging/windows/prem-down.wxs -arch x64 \
             -d Version="${major:-0}.${minor:-0}.${patch:-0}" -d ExeDir=dist \
-            -o prem-down_windows_x64.msi
+            -o prem-down_installer_windows.msi
       - name: Upload MSI to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" prem-down_windows_x64.msi
+        run: gh release upload "$TAG" prem-down_installer_windows.msi
       - name: Read ProductCode from the MSI
         shell: pwsh
         run: |
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $openArgs = @("$PWD\prem-down_windows_x64.msi", 0)
+          $openArgs = @("$PWD\prem-down_installer_windows.msi", 0)
           $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, $openArgs)
           $query = "SELECT Value FROM Property WHERE Property='ProductCode'"
           $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($query))
@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
         run: |
-          sha256=$(sha256sum prem-down_windows_x64.msi | cut -d' ' -f1)
+          sha256=$(sha256sum prem-down_installer_windows.msi | cut -d' ' -f1)
           gh repo sync lucuma13/winget-pkgs --source microsoft/winget-pkgs
           gh auth setup-git
           git clone --depth=1 --filter=blob:none --sparse \
@@ -122,3 +122,59 @@ jobs:
             --head "lucuma13:prem-down-$TAG" \
             --title "New version: lucuma13.prem-down version $TAG" \
             --body "Automated submission from https://github.com/lucuma13/prem-down/releases/tag/$TAG"
+  # macOS ships an optional .pkg installer alongside the Homebrew cask, for
+  # non-technical users who would rather not touch a terminal: it drops a
+  # universal prem-down binary in /usr/local/bin (on the default PATH) and its
+  # postinstall installs the Finder Quick Action for the logged-in user. It is
+  # unsigned, so first open needs the Gatekeeper override (see the README); the
+  # cask stays the frictionless path. GoReleaser only builds the tarballs (for
+  # the cask), so this job builds the universal binary and wraps it with
+  # pkgbuild (packaging/macos/scripts/postinstall).
+  macos-installer:
+    name: macOS installer
+    needs: [release]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build universal binary
+        run: |
+          # Mirrors the GoReleaser build flags in .goreleaser.yaml, then lipo the
+          # two arch slices into one binary that runs on Intel and Apple Silicon.
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
+              -trimpath -ldflags "-s -w -X main.version=$TAG" \
+              -o "build-$arch" ./cmd/prem-down
+          done
+          mkdir -p payload/usr/local/bin
+          lipo -create -output payload/usr/local/bin/prem-down build-amd64 build-arm64
+          chmod +x payload/usr/local/bin/prem-down
+      - name: Build .pkg
+        run: |
+          # pkgbuild makes the component; productbuild wraps it so Installer.app
+          # titles the window from distribution.xml, not the filename. The
+          # com.apple.provenance xattrs on the payload surface as AppleDouble
+          # entries in the component's listing, but installd merges them back
+          # into xattrs on extraction, so the installed tree is just the binary.
+          chmod +x packaging/macos/scripts/postinstall
+          pkgbuild --root payload --scripts packaging/macos/scripts \
+            --identifier com.lucuma13.prem-down --version "$TAG" \
+            --install-location / component.pkg
+          productbuild --distribution packaging/macos/distribution.xml \
+            --resources packaging/macos/resources \
+            --package-path . prem-down_installer_macos.pkg
+      - name: Upload .pkg to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" prem-down_installer_macos.pkg

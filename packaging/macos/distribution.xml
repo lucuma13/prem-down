@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- productbuild wraps the pkgbuild component (component.pkg) into a product
+     archive so Installer.app shows custom title. customize="never" gives a
+     straight install with no options page; hostArchitectures lets the universal
+     binary install on both Intel and Apple Silicon. -->
+<installer-gui-script minSpecVersion="2">
+    <title>prem-down</title>
+    <options customize="never" hostArchitectures="x86_64,arm64"/>
+    <!-- resources/background.png is docs/assets/prem-down.svg composited
+         bottom-left on a 1240x836 (620x418 @2x) transparent canvas, so it
+         scales crisply and shows over Installer's light or dark pane. The
+         resources dir is given to productbuild. Regenerate with:
+           rsvg-convert -w 260 -h 260 docs/assets/prem-down.svg -o logo.png
+           magick -size 1240x836 xc:none logo.png -gravity SouthWest
+             -geometry +52+110 -composite packaging/macos/resources/background.png -->
+    <background file="background.png" alignment="bottomleft" scaling="tofit"/>
+    <background-darkAqua file="background.png" alignment="bottomleft" scaling="tofit"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.lucuma13.prem-down"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.lucuma13.prem-down" visible="false">
+        <pkg-ref id="com.lucuma13.prem-down"/>
+    </choice>
+    <pkg-ref id="com.lucuma13.prem-down" version="0" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

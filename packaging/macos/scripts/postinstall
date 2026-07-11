@@ -1,0 +1,23 @@
+#!/bin/bash
+# Installer.app runs this as root after the payload is laid down. It installs
+# the per-user Finder Quick Action ("Downgrade for older Premiere") by invoking
+# `prem-down integrate` in the logged-in user's GUI session.
+#
+# It must NOT run integrate as root: integrate writes the workflow bundle under
+# the user's ~/Library/Services and flips the per-UID `pbs` preference, so a
+# root-run integrate would target /var/root and the wrong preference domain.
+# `launchctl asuser <uid>` re-homes it into the console user's session so
+# cfprefsd/pbs resolve to that user.
+#
+# Best-effort, mirroring the Homebrew cask's non-fatal postflight: if the
+# console user can't be resolved or integrate errors, the install still
+# succeeds and the user can run `prem-down integrate` themselves.
+consoleUser=$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)
+if [ -n "$consoleUser" ] && [ "$consoleUser" != "root" ] && [ "$consoleUser" != "loginwindow" ]; then
+  uid=$(/usr/bin/id -u "$consoleUser" 2>/dev/null)
+  if [ -n "$uid" ]; then
+    /bin/launchctl asuser "$uid" /usr/bin/sudo -u "$consoleUser" \
+      /usr/local/bin/prem-down integrate || true
+  fi
+fi
+exit 0
