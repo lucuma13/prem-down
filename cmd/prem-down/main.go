@@ -236,8 +236,8 @@ func previousRelease(v int) (xmlProjectVersion int, name string, ok bool) {
 // This is NOT a general XML parser; it leans on the shapes Premiere's
 // serialiser actually emits. In particular it assumes no raw '>' inside
 // attribute values (legal XML, but Premiere escapes it) and no CDATA
-// sections. A document that breaks those assumptions mis-tokenises and
-// surfaces as an unbalanced/mismatched-XML error for that file — never as a
+// sections. A document that breaks those assumptions tokenises incorrectly
+// and surfaces as an unbalanced/mismatched-XML error for that file — never as a
 // silently corrupted output.
 // --------------------------------------------------------------------------
 
@@ -528,7 +528,7 @@ func verifyDowngraded(xml string, wantVersion int) error {
 // stable attribute order: ObjectID="1" is written before Version= in the
 // <Project> tag (true of every release in the version map). If Adobe ever
 // reordered those attributes this would stop matching and the file would be
-// reported as unrecognised — a hard refusal, never a silent mis-rewrite.
+// reported as unrecognised — a hard refusal, never a silently incorrect rewrite.
 var projectVersionRe = regexp.MustCompile(`(<Project ObjectID="1"[^>]*\bVersion=")(\d+)(")`)
 
 func setProjectVersion(xml string, version int) (string, error) {
