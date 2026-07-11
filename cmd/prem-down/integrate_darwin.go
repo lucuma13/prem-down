@@ -28,8 +28,16 @@ const (
 	quickActionMenuTitle = "Downgrade for older Premiere"
 
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file and pick
-Quick Actions > ` + quickActionMenuTitle + `.`
+Quick Actions > ` + quickActionMenuTitle + `.
+If it doesn't appear, enable it with Quick Actions > Customise…`
 	integrationRemovedMessage = "Removed the Finder Quick Action."
+
+	// serviceEnabledStatus is the NSServicesStatus value that marks the Quick
+	// Action as enabled in every Finder context. It carries both the modern
+	// presentation_modes dictionary and the legacy enabled_* booleans so the
+	// entry reads as "on" across macOS versions.
+	serviceEnabledStatus = `{"enabled_context_menu":true,"enabled_services_menu":true,` +
+		`"presentation_modes":{"ContextMenu":true,"ServicesMenu":true,"FinderPreview":true,"TouchBar":false}}`
 )
 
 // quickActionScript is the Quick Action's shell step. Finder hands it the
@@ -344,7 +352,66 @@ func installIntegration() error {
 			return err
 		}
 	}
+	// Best-effort: newly registered Quick Actions default to off, so switch
+	// ours on. If this fails, integrationInstalledMessage documents the manual
+	// "Quick Actions > Customise" fallback.
+	_ = enableServiceMenu()
 	refreshServicesMenu()
+	return nil
+}
+
+// enableServiceMenu is the seam installIntegration uses to switch the Quick
+// Action on. It is a variable so tests can replace it: the real implementation
+// writes the per-user `pbs` preference domain, which cfprefsd resolves by UID
+// (ignoring $HOME), so it would otherwise flip the setting on the developer's
+// own machine during `go test`.
+var enableServiceMenu = enableQuickAction
+
+// serviceStatusKey identifies the Quick Action in the Services database (the
+// `pbs` NSServicesStatus dictionary). A workflow service carries no bundle
+// identifier, so pbs keys it under "(null)"; the middle segment is the menu
+// title and the suffix is the NSMessage declared in Info.plist.
+func serviceStatusKey() string {
+	return fmt.Sprintf("(null) - %s - runWorkflowAsService", quickActionMenuTitle)
+}
+
+// enableQuickAction turns the Quick Action on so it appears without the user
+// first ticking it under Finder's "Quick Actions > Customise".
+//
+// The state lives in the per-user `pbs` preference domain, whose key for a
+// workflow service begins with "(null)". `defaults -dict-add` cannot write a
+// key starting with "(" — it parses it as an old-style plist array — so the
+// edit is done on a temp copy: export the domain, splice our entry in with
+// plutil (which addresses the parenthesized key fine), import it back. Export
+// and import both go through cfprefsd, so there is no cache race with a direct
+// file edit. A `pbs -flush` (via refreshServicesMenu) then re-reads it.
+func enableQuickAction() error {
+	f, err := os.CreateTemp("", "prem-down-pbs-*.plist")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(tmp) }()
+
+	// Snapshot the current domain; an absent domain exports as an empty dict.
+	if err := exec.Command("defaults", "export", "pbs", tmp).Run(); err != nil { //nolint:gosec // G204: constant args; tmp is our own temp path
+		return err
+	}
+	// Ensure the NSServicesStatus container exists before addressing into it;
+	// plutil -replace does not create intermediate dictionaries.
+	if exec.Command("plutil", "-extract", "NSServicesStatus", "raw", tmp).Run() != nil { //nolint:gosec // G204: constant args; own temp path
+		if err := exec.Command("plutil", "-insert", "NSServicesStatus", "-dictionary", tmp).Run(); err != nil { //nolint:gosec // G204: constant args; own temp path
+			return err
+		}
+	}
+	keyPath := "NSServicesStatus." + serviceStatusKey()
+	if err := exec.Command("plutil", "-replace", keyPath, "-json", serviceEnabledStatus, tmp).Run(); err != nil { //nolint:gosec // G204: keyPath derives from a constant title; own temp path
+		return err
+	}
+	if err := exec.Command("defaults", "import", "pbs", tmp).Run(); err != nil { //nolint:gosec // G204: constant args; own temp path
+		return err
+	}
 	return nil
 }
 
