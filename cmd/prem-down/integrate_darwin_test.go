@@ -38,7 +38,7 @@ func TestServiceEnableStatus(t *testing.T) {
 	}
 }
 
-// integrateMain is the CLI glue for the subcommand: `integrate` installs the
+// cli.integrate is the CLI glue for the subcommand: `integrate` installs the
 // Quick Action and `integrate --remove` takes it away. Drive it end-to-end with
 // HOME pointed at a temp dir so the real Services folder is never touched.
 func TestIntegrateMainInstallAndRemove(t *testing.T) {
@@ -49,20 +49,21 @@ func TestIntegrateMainInstallAndRemove(t *testing.T) {
 	enableServiceMenu = func() error { return nil }
 	t.Cleanup(func() { enableServiceMenu = origEnable })
 
+	c := newTestCLI("")
 	bundle := filepath.Join(home, "Library", "Services", quickActionMenuTitle+".workflow")
 
 	// --help is a clean no-op that installs nothing.
-	integrateMain([]string{"-h"})
+	c.integrate([]string{"-h"})
 	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
 		t.Errorf("integrate --help should not install anything (stat err: %v)", err)
 	}
 
-	integrateMain(nil)
+	c.integrate(nil)
 	if _, err := os.Stat(bundle); err != nil {
 		t.Fatalf("integrate did not create the bundle: %v", err)
 	}
 
-	integrateMain([]string{"--remove"})
+	c.integrate([]string{"--remove"})
 	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
 		t.Errorf("integrate --remove left the bundle behind (stat err: %v)", err)
 	}

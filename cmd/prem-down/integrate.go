@@ -19,7 +19,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 )
 
 func usageIntegrate(w io.Writer) {
@@ -34,29 +33,30 @@ Options:
 `, integrationKind)
 }
 
-func integrateMain(args []string) {
+func (c *cli) integrate(args []string) int {
 	remove := false
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
-			usageIntegrate(os.Stdout)
-			return
+			usageIntegrate(c.out)
+			return 0
 		case "--remove":
 			remove = true
 		default:
-			usageIntegrate(os.Stderr)
-			fatal("error: unknown option %s", a)
+			usageIntegrate(c.err)
+			return c.fatal("error: unknown option %s", a)
 		}
 	}
 	if remove {
 		if err := removeIntegration(); err != nil {
-			fatal("error: %v", err)
+			return c.fatal("error: %v", err)
 		}
-		fmt.Println(integrationRemovedMessage)
-		return
+		_, _ = fmt.Fprintln(c.out, integrationRemovedMessage)
+		return 0
 	}
 	if err := installIntegration(); err != nil {
-		fatal("error: %v", err)
+		return c.fatal("error: %v", err)
 	}
-	fmt.Println(integrationInstalledMessage)
+	_, _ = fmt.Fprintln(c.out, integrationInstalledMessage)
+	return 0
 }

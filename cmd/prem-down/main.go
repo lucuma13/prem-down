@@ -147,29 +147,43 @@ var reconstructClassOverrides = map[classField]string{
 
 var classIDRe = regexp.MustCompile(`\bClassID="([^"]+)"`)
 
-// guiMode is set by --gui, passed by the OS context-menu wiring (see
-// integrate.go): the shell opens a console window that closes the instant the
-// process exits, so wait for Enter before exiting to keep the result
-// readable. Not shown in --help; it is plumbing, not a user-facing option.
-var guiMode bool
+// cli carries the process's IO streams and the --gui flag so the command logic
+// writes through injected streams instead of the os.Stdout/os.Stderr/os.Stdin
+// globals. Tests construct a cli over bytes.Buffers and call run/downgrade
+// directly — no pipe redirection, no process-exit seam, no global save/restore.
+type cli struct {
+	out io.Writer // normal output (progress, "wrote ...", help)
+	err io.Writer // diagnostics
+	in  io.Reader // stdin; read only for the --gui pause prompt
 
-func pauseIfGUI() {
-	if !guiMode {
-		return
-	}
-	fmt.Fprint(os.Stderr, "\nPress Enter to close this window...")
-	_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
+	// gui is set by --gui, passed by the OS context-menu wiring (see
+	// integrate.go): the shell opens a console window that closes the instant
+	// the process exits, so wait for Enter before exiting to keep the result
+	// readable. Not shown in --help; it is plumbing, not a user-facing option.
+	gui bool
 }
 
-// osExit is the process-exit seam used by fatal (and main). Tests replace it so
-// a fatal path can be exercised in-process — aborting the caller via panic —
-// instead of killing the test binary.
-var osExit = os.Exit
+// newCLI wires a cli to the real process streams; used by main.
+func newCLI() *cli {
+	return &cli{out: os.Stdout, err: os.Stderr, in: os.Stdin}
+}
 
-func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	pauseIfGUI()
-	osExit(1)
+func (c *cli) pauseIfGUI() {
+	if !c.gui {
+		return
+	}
+	_, _ = fmt.Fprint(c.err, "\nPress Enter to close this window...")
+	_, _ = bufio.NewReader(c.in).ReadBytes('\n')
+}
+
+// fatal reports a user error and returns the process exit code (1) for the
+// caller to return, pausing first when running under --gui. It replaces the old
+// os.Exit-from-anywhere: run and its helpers thread the code back to main, which
+// is the only place the process actually exits.
+func (c *cli) fatal(format string, args ...any) int {
+	_, _ = fmt.Fprintf(c.err, format+"\n", args...)
+	c.pauseIfGUI()
+	return 1
 }
 
 // releaseNames lists the known releases newest-first (releases is stored
@@ -195,21 +209,20 @@ func releaseExamples() string {
 }
 
 // resolveRelease returns the XML <Project> Version for a release name
-// (case-insensitive, aliases accepted).
-func resolveRelease(name string) int {
+// (case-insensitive, aliases accepted), or an error naming the known releases.
+func resolveRelease(name string) (int, error) {
 	want := strings.ToLower(strings.TrimSpace(name))
 	for _, r := range releases {
 		if strings.ToLower(r.name) == want {
-			return r.xmlProjectVersion
+			return r.xmlProjectVersion, nil
 		}
 		for _, a := range r.aliases {
 			if strings.ToLower(a) == want {
-				return r.xmlProjectVersion
+				return r.xmlProjectVersion, nil
 			}
 		}
 	}
-	fatal("error: unknown release %q. Known releases: %s", name, releaseNames())
-	return 0
+	return 0, fmt.Errorf("unknown release %q. Known releases: %s", name, releaseNames())
 }
 
 // previousRelease returns the known release one step below XML <Project>
@@ -580,7 +593,7 @@ func uniquePath(path string) string {
 // rest. Every failure is per-file — operational ones (unreadable file,
 // out-of-range target, write failure) and genuinely malformed XML alike — so
 // one corrupt project in a batch never aborts the remaining files.
-func downgrade(src, dst string, projectVersion int, verbose bool) error {
+func (c *cli) downgrade(src, dst string, projectVersion int, verbose bool) error {
 	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
 	if err != nil {
 		return err
@@ -625,7 +638,7 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 		}
 		projectVersion = pv
 		if verbose {
-			fmt.Printf("  auto target: source version %d -> %s (version %d)\n",
+			_, _ = fmt.Fprintf(c.out, "  auto target: source version %d -> %s (version %d)\n",
 				sourceVersion, name, pv)
 		}
 	}
@@ -655,13 +668,13 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 				return keys[i].field < keys[j].field
 			})
 			for _, k := range keys {
-				fmt.Printf("  inserted %s/%s (%dx)\n", k.tag, k.field, stats[k])
+				_, _ = fmt.Fprintf(c.out, "  inserted %s/%s (%dx)\n", k.tag, k.field, stats[k])
 			}
 		} else {
-			fmt.Printf("  source is version %d (<= %d); class formats already compatible, "+
+			_, _ = fmt.Fprintf(c.out, "  source is version %d (<= %d); class formats already compatible, "+
 				"only re-gating <Project> version\n", sourceVersion, lastDenseSerialisationProjectVersion)
 		}
-		fmt.Printf("  set Project version -> %d\n", projectVersion)
+		_, _ = fmt.Fprintf(c.out, "  set Project version -> %d\n", projectVersion)
 	}
 
 	// Prove the transform before committing it to disk: re-gated version, every
@@ -692,7 +705,7 @@ func downgrade(src, dst string, projectVersion int, verbose bool) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", dst)
+	_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
 	return nil
 }
 
@@ -716,13 +729,13 @@ Subcommands:
 }
 
 func main() {
-	osExit(run(os.Args[1:]))
+	os.Exit(newCLI().run(os.Args[1:]))
 }
 
 // run holds main's logic, split out so it can be tested: it returns the process
-// exit code instead of calling os.Exit, and user-error paths still abort through
-// fatal (which calls the osExit seam). main is then a one-line shim.
-func run(args []string) int {
+// exit code instead of calling os.Exit, and user-error paths return c.fatal's
+// code rather than exiting mid-stack. main is then a one-line shim.
+func (c *cli) run(args []string) int {
 	// When Explorer activates prem-down as the Drop Target COM server (Windows
 	// only; "-Embedding"), it takes over completely: it collects the selected
 	// files and relaunches prem-down --gui on them. See integrate_windows.go.
@@ -730,8 +743,7 @@ func run(args []string) int {
 		return 0
 	}
 	if len(args) > 0 && args[0] == "integrate" {
-		integrateMain(args[1:])
-		return 0
+		return c.integrate(args[1:])
 	}
 
 	var positionals []string
@@ -741,35 +753,35 @@ func run(args []string) int {
 		a := args[i]
 		switch {
 		case a == "-h" || a == "--help":
-			usage(os.Stdout)
+			usage(c.out)
 			return 0
 		case a == "--version":
-			fmt.Printf("prem-down %s\n", version)
+			_, _ = fmt.Fprintf(c.out, "prem-down %s\n", version)
 			return 0
 		case a == "--to":
 			i++
 			if i >= len(args) {
-				fatal("error: --to requires a value")
+				return c.fatal("error: --to requires a value")
 			}
-			to = args[i] //nolint:gosec // G602: the i >= len(args) guard above exits via fatal, so i is in range here
+			to = args[i] //nolint:gosec // G602: the i >= len(args) guard above returns first, so i is in range here
 		case strings.HasPrefix(a, "--to="):
 			to = strings.TrimPrefix(a, "--to=")
 			if to == "" {
-				fatal("error: --to requires a value")
+				return c.fatal("error: --to requires a value")
 			}
 		case a == "-v" || a == "--verbose":
 			verbose = true
 		case a == "--gui":
-			guiMode = true
+			c.gui = true
 		case strings.HasPrefix(a, "-") && a != "-":
-			usage(os.Stderr)
-			fatal("error: unknown option %s", a)
+			usage(c.err)
+			return c.fatal("error: unknown option %s", a)
 		default:
 			positionals = append(positionals, a)
 		}
 	}
 	if len(positionals) == 0 {
-		usage(os.Stderr)
+		usage(c.err)
 		return 2
 	}
 
@@ -779,7 +791,11 @@ func run(args []string) int {
 	// touched.
 	targetVersion := 0
 	if to != "" {
-		targetVersion = resolveRelease(to)
+		v, err := resolveRelease(to)
+		if err != nil {
+			return c.fatal("error: %v", err)
+		}
+		targetVersion = v
 	}
 
 	// Each file is converted independently: a failure on one is reported and the
@@ -789,18 +805,18 @@ func run(args []string) int {
 	failed := false
 	for _, input := range positionals {
 		if _, err := os.Stat(input); err != nil { //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
-			fmt.Fprintf(os.Stderr, "error: %s not found\n", input)
+			_, _ = fmt.Fprintf(c.err, "error: %s not found\n", input)
 			failed = true
 			continue
 		}
 		ext := filepath.Ext(input)
 		dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
-		if err := downgrade(input, dst, targetVersion, verbose); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s: %v\n", input, err)
+		if err := c.downgrade(input, dst, targetVersion, verbose); err != nil {
+			_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", input, err)
 			failed = true
 		}
 	}
-	pauseIfGUI()
+	c.pauseIfGUI()
 	if failed {
 		return 1
 	}
