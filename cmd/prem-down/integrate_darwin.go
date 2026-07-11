@@ -458,3 +458,9 @@ func removeIntegration() error {
 func refreshServicesMenu() {
 	_ = exec.Command("/System/Library/CoreServices/pbs", "-flush").Run()
 }
+
+// maybeRunCOMServer is a no-op on macOS: the Finder Quick Action invokes
+// prem-down directly with the selected files, so there is no COM Drop Target
+// server activation to intercept (that mechanism is Windows-only; see
+// integrate_windows.go).
+func maybeRunCOMServer([]string) bool { return false }

@@ -46,7 +46,10 @@
         </Component>
 
         <!-- Mirrors contextMenuRegAdds in integrate_windows.go (which writes
-             HKCU for portable installs); keep the two in sync. -->
+             HKCU for portable installs); keep the two in sync. The verb is a
+             Drop Target: its CLSID resolves to prem-down's own COM LocalServer
+             so a multi-file selection reaches one process. The CLSID value here
+             must match dropHandlerCLSID in integrate_windows.go. -->
         <Component Id="ContextMenu">
           <RegistryKey Root="HKLM"
                        Key="SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down">
@@ -54,9 +57,16 @@
                            Value="Downgrade for older Premiere" KeyPath="yes" />
             <RegistryValue Type="string" Name="Icon"
                            Value="[INSTALLFOLDER]prem-down.exe" />
-            <RegistryKey Key="command">
-              <RegistryValue Type="string"
-                             Value="&quot;[INSTALLFOLDER]prem-down.exe&quot; --gui &quot;%1&quot;" />
+            <RegistryKey Key="DropTarget">
+              <RegistryValue Type="string" Name="CLSID"
+                             Value="{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}" />
+            </RegistryKey>
+          </RegistryKey>
+          <RegistryKey Root="HKLM"
+                       Key="SOFTWARE\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}">
+            <RegistryValue Type="string" Value="prem-down Premiere downgrade handler" />
+            <RegistryKey Key="LocalServer32">
+              <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]prem-down.exe&quot;" />
             </RegistryKey>
           </RegistryKey>
         </Component>

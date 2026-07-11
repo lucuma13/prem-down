@@ -612,6 +612,12 @@ Subcommands:
 
 func main() {
 	args := os.Args[1:]
+	// When Explorer activates prem-down as the Drop Target COM server (Windows
+	// only; "-Embedding"), it takes over completely: it collects the selected
+	// files and relaunches prem-down --gui on them. See droptarget_windows.go.
+	if maybeRunCOMServer(args) {
+		return
+	}
 	if len(args) > 0 && args[0] == "integrate" {
 		integrateMain(args[1:])
 		return

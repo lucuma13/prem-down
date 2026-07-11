@@ -20,3 +20,8 @@ var errIntegrationUnsupported = errors.New("the right-click integration is only 
 
 func installIntegration() error { return errIntegrationUnsupported }
 func removeIntegration() error  { return errIntegrationUnsupported }
+
+// maybeRunCOMServer is a no-op off Windows: only Windows Explorer activates
+// prem-down as a COM Drop Target server (see integrate_windows.go), so this is
+// never a server invocation here.
+func maybeRunCOMServer([]string) bool { return false }
