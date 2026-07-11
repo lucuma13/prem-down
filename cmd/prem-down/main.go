@@ -698,11 +698,16 @@ func (c *cli) downgrade(src, dst string, projectVersion int, verbose bool) error
 	if err != nil {
 		return err
 	}
+	// O_EXCL means we created dst, so it holds nothing but our own partial
+	// output; on any failure remove it rather than leave a truncated project
+	// sitting next to the original where it could be opened by mistake.
 	if _, err := f.Write(out.Bytes()); err != nil {
 		_ = f.Close()
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
 		return err
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
 		return err
 	}
 	_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
