@@ -17,7 +17,7 @@ FileExtensions:
   - prproj
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/lucuma13/prem-down/releases/download/__VERSION__/prem-down_installer_windows_v__VERSION__.msi
+    InstallerUrl: https://github.com/lucuma13/prem-down/releases/download/__VERSION__/prem-down_installer_windows.msi
     InstallerSha256: __SHA256__
     ProductCode: "__PRODUCT_CODE__"
 ManifestType: installer

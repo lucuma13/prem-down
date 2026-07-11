@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- productbuild wraps the pkgbuild component (component.pkg) into a product
-     archive so Installer.app shows custom title. customize="never" gives a
+     archive so Installer.app shows a custom title ("prem-down v<version>"; the
+     release job substitutes __VERSION__). customize="never" gives a
      straight install with no options page; hostArchitectures lets the universal
      binary install on both Intel and Apple Silicon. -->
 <installer-gui-script minSpecVersion="2">
-    <title>prem-down</title>
+    <title>prem-down v__VERSION__</title>
     <options customize="never" hostArchitectures="x86_64,arm64"/>
     <!-- resources/background.png is docs/assets/prem-down.svg composited
          bottom-left on a 1240x836 (620x418 @2x) transparent canvas, so it

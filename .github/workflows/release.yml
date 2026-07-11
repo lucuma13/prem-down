@@ -46,7 +46,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
-      MSI: prem-down_installer_windows_v${{ github.ref_name }}.msi
+      MSI: prem-down_installer_windows.msi
     steps:
       - name: Checkout source code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -139,7 +139,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
-      PKG: prem-down_installer_macos_v${{ github.ref_name }}.pkg
+      PKG: prem-down_installer_macos.pkg
     steps:
       - name: Checkout source code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -173,7 +173,9 @@ jobs:
           pkgbuild --root payload --scripts packaging/macos/scripts \
             --identifier com.lucuma13.prem-down --version "$TAG" \
             --install-location / component.pkg
-          productbuild --distribution packaging/macos/distribution.xml \
+          # Fold the version into the installer window title ("prem-down v<tag>").
+          sed "s/__VERSION__/$TAG/g" packaging/macos/distribution.xml > distribution.xml
+          productbuild --distribution distribution.xml \
             --resources packaging/macos/resources \
             --package-path . "$PKG"
       - name: Upload .pkg to the release

@@ -18,7 +18,7 @@
   the winget manifest.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="prem-down"
+  <Package Name="prem-down v$(var.Version)"
            Manufacturer="lucuma13"
            Version="$(var.Version)"
            UpgradeCode="596A17E3-959D-4A30-B125-788043C7487E"
