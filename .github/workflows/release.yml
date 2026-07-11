@@ -32,12 +32,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-  # winget ships an MSI rather than the bare zip so the Explorer context menu,
-  # PATH entry and uninstaller come with the package. GoReleaser cannot build
-  # MSIs, so this job picks up where it left off: it wraps the released
-  # Windows binary with WiX (packaging/windows/prem-down.wxs), publishes the
-  # MSI as a release asset (also the direct-download path for editors without
-  # winget), and opens the manifest PR against microsoft/winget-pkgs.
+  # Windows ships as an MSI installer so the Explorer context menu, PATH entry
+  # and uninstaller come with the package. GoReleaser builds neither the Windows
+  # binary nor MSIs, so this job does both: it compiles the Windows exe, wraps
+  # it with WiX (packaging/windows/prem-down.wxs), publishes the MSI as a
+  # release asset (the direct-download path for editors without winget), and
+  # opens the manifest PR against microsoft/winget-pkgs.
   windows-installer:
     name: Windows installer
     needs: [release]
@@ -51,13 +51,19 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Download released Windows binary
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build Windows binary
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "$TAG" --pattern "prem-down_windows_amd64.zip"
-          unzip prem-down_windows_amd64.zip -d dist
+          # Mirrors the GoReleaser build flags in .goreleaser.yaml; the icon is
+          # embedded automatically from the committed rsrc_windows_amd64.syso.
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+            -trimpath -ldflags "-s -w -X main.version=$TAG" \
+            -o dist/prem-down.exe ./cmd/prem-down
       - name: Build MSI
         shell: bash
         run: |

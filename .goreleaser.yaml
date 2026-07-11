@@ -11,21 +11,16 @@ builds:
       - -s -w -X main.version={{ .Version }}
     goos:
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
 archives:
   - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+# No checksums.txt: it would cover only the macOS tarballs, not the MSI (built
+# in a separate release.yml job).
 checksum:
-  name_template: checksums.txt
+  disable: true
 changelog:
   use: github-native
 # Homebrew tap: GoReleaser generates Casks/prem-down.rb (with archive URLs and
@@ -65,8 +60,9 @@ homebrew_casks:
           if OS.mac? && File.exist?("#{staged_path}/prem-down")
             system_command "#{staged_path}/prem-down", args: ["integrate", "--remove"], must_succeed: false
           end
-# winget is NOT published from here: winget ships an MSI (so the Explorer
-# context menu installs/uninstalls with the package), which GoReleaser cannot
-# build. The windows-installer job in release.yml builds the MSI with WiX from
-# packaging/windows/prem-down.wxs, uploads it to the GitHub release, and opens
-# the manifest PR against microsoft/winget-pkgs from packaging/winget/.
+# Windows is NOT built or published from here: it ships only as an MSI (so the
+# Explorer context menu installs/uninstalls with the package), which GoReleaser
+# cannot build. The windows-installer job in release.yml compiles the Windows
+# binary itself, wraps it in an MSI with WiX from packaging/windows/prem-down.wxs,
+# uploads the MSI to the GitHub release, and opens the manifest PR against
+# microsoft/winget-pkgs from packaging/winget/.
