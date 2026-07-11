@@ -15,7 +15,7 @@ builds:
       - amd64
       - arm64
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: '{{ .ProjectName }}_macos_{{ if eq .Arch "amd64" }}intel{{ else }}silicon{{ end }}'
     formats: [tar.gz]
 # No checksums.txt: it would cover only the macOS tarballs, not the MSI (built
 # in a separate release.yml job).

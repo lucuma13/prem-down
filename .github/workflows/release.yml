@@ -73,17 +73,17 @@ jobs:
           IFS=. read -r major minor patch _ <<<"$TAG"
           wix build packaging/windows/prem-down.wxs -arch x64 \
             -d Version="${major:-0}.${minor:-0}.${patch:-0}" -d ExeDir=dist \
-            -o prem-down_windows_amd64.msi
+            -o prem-down_windows_x64.msi
       - name: Upload MSI to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" prem-down_windows_amd64.msi
+        run: gh release upload "$TAG" prem-down_windows_x64.msi
       - name: Read ProductCode from the MSI
         shell: pwsh
         run: |
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $openArgs = @("$PWD\prem-down_windows_amd64.msi", 0)
+          $openArgs = @("$PWD\prem-down_windows_x64.msi", 0)
           $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, $openArgs)
           $query = "SELECT Value FROM Property WHERE Property='ProductCode'"
           $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($query))
@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
         run: |
-          sha256=$(sha256sum prem-down_windows_amd64.msi | cut -d' ' -f1)
+          sha256=$(sha256sum prem-down_windows_x64.msi | cut -d' ' -f1)
           gh repo sync lucuma13/winget-pkgs --source microsoft/winget-pkgs
           gh auth setup-git
           git clone --depth=1 --filter=blob:none --sparse \
