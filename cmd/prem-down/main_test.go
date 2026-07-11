@@ -21,8 +21,38 @@ const sparseVideoComponentParam = `<VideoComponentParam ObjectID="10" ClassID="x
 	<StartKeyframe>0,true,0,0,0,0,0,0</StartKeyframe>
 </VideoComponentParam>`
 
+// mustReconstruct, mustGetProjectVersion and mustSetProjectVersion unwrap the
+// error returns for tests that exercise well-formed inputs; the error paths
+// have their own dedicated tests below.
+func mustReconstruct(t *testing.T, xml string) (string, map[fieldKey]int) {
+	t.Helper()
+	out, stats, err := reconstructPositionalClasses(xml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out, stats
+}
+
+func mustGetProjectVersion(t *testing.T, xml string) int {
+	t.Helper()
+	v, err := getProjectVersion(xml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func mustSetProjectVersion(t *testing.T, xml string, version int) string {
+	t.Helper()
+	out, err := setProjectVersion(xml, version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestRebuildInsertsMissingBounds(t *testing.T) {
-	out, stats := reconstructPositionalClasses(sparseVideoComponentParam)
+	out, stats := mustReconstruct(t, sparseVideoComponentParam)
 	for _, field := range reconstructFieldsByTag["VideoComponentParam"] {
 		want := "<" + field + ">" + reconstructDefaults[fieldKey{"VideoComponentParam", field}] + "</" + field + ">"
 		if !strings.Contains(out, want) {
@@ -50,7 +80,7 @@ func TestRebuildLeavesCompleteInstanceByteIdentical(t *testing.T) {
 	<LowerBound>-150</LowerBound>
 	<UpperBound>150</UpperBound>
 </VideoComponentParam>`
-	out, stats := reconstructPositionalClasses(complete)
+	out, stats := mustReconstruct(t, complete)
 	if out != complete {
 		t.Errorf("complete instance was modified:\n%s", out)
 	}
@@ -65,7 +95,7 @@ func TestRebuildInsertsOnlyMissingBound(t *testing.T) {
 	partial := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
 	<LowerBound>-150</LowerBound>
 </VideoComponentParam>`
-	out, stats := reconstructPositionalClasses(partial)
+	out, stats := mustReconstruct(t, partial)
 	if !strings.Contains(out, "<LowerBound>-150</LowerBound>") {
 		t.Errorf("present bound was disturbed:\n%s", out)
 	}
@@ -88,7 +118,7 @@ func TestRebuildClassOverrideForColorUpperBound(t *testing.T) {
 	color := `<VideoComponentParam ObjectID="10" ClassID="` + colorCID + `" Version="10">
 	<Name>Set color</Name>
 </VideoComponentParam>`
-	out, _ := reconstructPositionalClasses(color)
+	out, _ := mustReconstruct(t, color)
 	if !strings.Contains(out, "<UpperBound>18446744073709551615</UpperBound>") {
 		t.Errorf("color class did not get the unbounded UpperBound override:\n%s", out)
 	}
@@ -101,7 +131,7 @@ func TestRebuildClassOverrideForColorUpperBound(t *testing.T) {
 	ordinary := `<VideoComponentParam ObjectID="11" ClassID="cc12343e-f113-4d3b-ae05-b287db77d461" Version="10">
 	<Name>Opacity</Name>
 </VideoComponentParam>`
-	out, _ = reconstructPositionalClasses(ordinary)
+	out, _ = mustReconstruct(t, ordinary)
 	if !strings.Contains(out, "<UpperBound>true</UpperBound>") {
 		t.Errorf("ordinary class should get the true sentinel, not the override:\n%s", out)
 	}
@@ -110,7 +140,7 @@ func TestRebuildClassOverrideForColorUpperBound(t *testing.T) {
 func TestRebuildSkipsObjectRefs(t *testing.T) {
 	// A reference (no Version attribute, self-closing) must not be touched.
 	ref := `<VideoComponentParam ObjectRef="10"/>`
-	out, stats := reconstructPositionalClasses(ref)
+	out, stats := mustReconstruct(t, ref)
 	if out != ref || len(stats) != 0 {
 		t.Errorf("reference was modified: %q, stats %v", out, stats)
 	}
@@ -121,10 +151,10 @@ func TestSetAndGetProjectVersion(t *testing.T) {
 <Project ObjectID="1" ClassID="y" Version="45">
 </Project>
 </PremiereData>`
-	if v := getProjectVersion(xml); v != 45 {
+	if v := mustGetProjectVersion(t, xml); v != 45 {
 		t.Fatalf("getProjectVersion = %d, want 45", v)
 	}
-	out := setProjectVersion(xml, 43)
+	out := mustSetProjectVersion(t, xml, 43)
 	if !strings.Contains(out, `<Project ObjectID="1" ClassID="y" Version="43">`) {
 		t.Errorf("version not rewritten:\n%s", out)
 	}
@@ -170,8 +200,12 @@ func TestParseXMLRenderRoundTrip(t *testing.T) {
 		`before < not a tag > after`,
 	}
 	for _, in := range inputs {
+		roots, err := parseXML(in)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var b strings.Builder
-		for _, r := range parseXML(in) {
+		for _, r := range roots {
 			switch v := r.(type) {
 			case string:
 				b.WriteString(v)
@@ -254,32 +288,6 @@ func TestPreviousRelease(t *testing.T) {
 	}
 }
 
-func TestWarnTarget(t *testing.T) {
-	capture := func(version int) string {
-		t.Helper()
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		orig := os.Stderr
-		os.Stderr = w
-		warnTarget(version)
-		_ = w.Close()
-		os.Stderr = orig
-		out, _ := io.ReadAll(r)
-		return string(out)
-	}
-	if got := capture(minConvertibleProjectVersion - 1); !strings.Contains(got, "warning") {
-		t.Errorf("below-floor target should warn, got %q", got)
-	}
-	if got := capture(minConvertibleProjectVersion); got != "" {
-		t.Errorf("at-floor target should not warn, got %q", got)
-	}
-	if got := capture(minConvertibleProjectVersion + 5); got != "" {
-		t.Errorf("above-floor target should not warn, got %q", got)
-	}
-}
-
 func TestUniquePath(t *testing.T) {
 	dir := t.TempDir()
 	base := filepath.Join(dir, "out.prproj")
@@ -329,10 +337,10 @@ func TestDowngradePlainXMLInput(t *testing.T) {
 	}
 
 	outXML := string(gunzipFile(t, out))
-	if getProjectVersion(outXML) != 41 {
-		t.Fatalf("output version = %d, want 41", getProjectVersion(outXML))
+	if v := mustGetProjectVersion(t, outXML); v != 41 {
+		t.Fatalf("output version = %d, want 41", v)
 	}
-	if outXML != setProjectVersion(xml, 41) {
+	if outXML != mustSetProjectVersion(t, xml, 41) {
 		t.Errorf("pre-2026 plain input should only be re-gated, got:\n%s", outXML)
 	}
 }
@@ -352,7 +360,7 @@ func TestDowngradeAutoTargetVerbose(t *testing.T) {
 	}
 
 	outXML := string(gunzipFile(t, out))
-	if got := getProjectVersion(outXML); got != 43 {
+	if got := mustGetProjectVersion(t, outXML); got != 43 {
 		t.Fatalf("auto-target of v45 source = %d, want 43", got)
 	}
 }
@@ -532,7 +540,7 @@ func TestPre2026PassThrough(t *testing.T) {
 
 	inXML := string(gunzipFile(t, fixture))
 	outXML := string(gunzipFile(t, out))
-	expected := setProjectVersion(inXML, 42)
+	expected := mustSetProjectVersion(t, inXML, 42)
 	if outXML != expected {
 		t.Fatal("v43 pass-through output is not input-with-regated-version")
 	}
@@ -554,8 +562,8 @@ func TestDowngrade2026Fixture(t *testing.T) {
 	}
 	outXML := string(gunzipFile(t, out))
 
-	if getProjectVersion(outXML) != 43 {
-		t.Fatalf("output project version = %d, want 43", getProjectVersion(outXML))
+	if v := mustGetProjectVersion(t, outXML); v != 43 {
+		t.Fatalf("output project version = %d, want 43", v)
 	}
 
 	// Every VideoComponentParam definition (has a Version attr; not an
@@ -640,10 +648,6 @@ func runCaptured(t *testing.T, fn func() int) (code int, exited bool, stdout, st
 	return code, exited, outBuf.String(), errBuf.String()
 }
 
-// Every helper that reports a corrupt/unrecognised document does so via fatal
-// (a hard exit), since it means a malformed input rather than an ordinary skip.
-// Each must exit 1 and name the problem.
-
 func TestResolveReleaseUnknownExits(t *testing.T) {
 	code, exited, _, stderr := runCaptured(t, func() int { return resolveRelease("NoSuchRelease") })
 	if !exited || code != 1 {
@@ -654,58 +658,62 @@ func TestResolveReleaseUnknownExits(t *testing.T) {
 	}
 }
 
-func TestParseXMLFatalCases(t *testing.T) {
+// A corrupt/unrecognised document surfaces as a returned error (never a hard
+// exit), so a batch caller can report the one bad file and keep going.
+
+func TestParseXMLErrors(t *testing.T) {
 	cases := map[string]string{
 		"unbalanced close": `</Orphan>`,
 		"mismatched close": `<A Version="1"></B>`,
 		"never closed":     `<A Version="1">text`,
 	}
 	for name, in := range cases {
-		code, exited, _, stderr := runCaptured(t, func() int { parseXML(in); return 0 })
-		if !exited || code != 1 {
-			t.Errorf("%s: expected fatal exit 1, got exited=%v code=%d", name, exited, code)
+		_, err := parseXML(in)
+		if err == nil {
+			t.Errorf("%s: expected an error, got nil", name)
+			continue
 		}
-		if !strings.Contains(strings.ToLower(stderr), "xml") {
-			t.Errorf("%s: missing XML diagnostic: %q", name, stderr)
+		if !strings.Contains(strings.ToLower(err.Error()), "xml") {
+			t.Errorf("%s: missing XML diagnostic: %q", name, err)
 		}
 	}
 }
 
-func TestSetProjectVersionWrongCountExits(t *testing.T) {
+func TestReconstructPositionalClassesPropagatesParseError(t *testing.T) {
+	// The instance regex matches, but the region's XML is malformed (the inner
+	// mismatched close). The error must reach the caller instead of exiting.
+	bad := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<LowerBound>1</Wrong>
+</VideoComponentParam>`
+	if _, _, err := reconstructPositionalClasses(bad); err == nil {
+		t.Fatal("expected a parse error for a malformed instance, got nil")
+	}
+}
+
+func TestSetProjectVersionWrongCount(t *testing.T) {
 	cases := map[string]string{
 		"zero matches": `<PremiereData Version="3"></PremiereData>`,
 		"two matches":  `<Project ObjectID="1" Version="45"><Project ObjectID="1" Version="45">`,
 	}
 	for name, xml := range cases {
-		code, exited, _, stderr := runCaptured(t, func() int { setProjectVersion(xml, 43); return 0 })
-		if !exited || code != 1 {
-			t.Errorf("%s: expected fatal exit 1, got exited=%v code=%d", name, exited, code)
-		}
-		if !strings.Contains(stderr, "exactly one") {
-			t.Errorf("%s: missing diagnostic: %q", name, stderr)
+		_, err := setProjectVersion(xml, 43)
+		if err == nil || !strings.Contains(err.Error(), "exactly one") {
+			t.Errorf("%s: expected an 'exactly one' error, got %v", name, err)
 		}
 	}
 }
 
-func TestGetProjectVersionExits(t *testing.T) {
+func TestGetProjectVersionErrors(t *testing.T) {
 	// No <Project ObjectID="1"> tag at all -> no regex match.
-	code, exited, _, stderr := runCaptured(t, func() int { getProjectVersion("<PremiereData/>"); return 0 })
-	if !exited || code != 1 {
-		t.Errorf("absent project tag should fatal 1, got exited=%v code=%d", exited, code)
-	}
-	if !strings.Contains(stderr, "could not find") {
-		t.Errorf("missing diagnostic: %q", stderr)
+	if _, err := getProjectVersion("<PremiereData/>"); err == nil || !strings.Contains(err.Error(), "could not find") {
+		t.Errorf("absent project tag: expected a 'could not find' error, got %v", err)
 	}
 
 	// The regex only captures digits, so the only way to reach the Atoi error is
 	// a version with more digits than an int can hold (a range error).
 	huge := `<Project ObjectID="1" ClassID="y" Version="` + strings.Repeat("9", 40) + `">`
-	code, exited, _, stderr = runCaptured(t, func() int { getProjectVersion(huge); return 0 })
-	if !exited || code != 1 {
-		t.Errorf("over-long version should fatal 1, got exited=%v code=%d", exited, code)
-	}
-	if !strings.Contains(stderr, "invalid") {
-		t.Errorf("missing diagnostic: %q", stderr)
+	if _, err := getProjectVersion(huge); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("over-long version: expected an 'invalid' error, got %v", err)
 	}
 }
 
@@ -754,12 +762,53 @@ func TestRunUnknownOptionExits(t *testing.T) {
 }
 
 func TestRunToRequiresValueExits(t *testing.T) {
-	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"--to"}) })
-	if !exited || code != 1 {
-		t.Errorf("--to without a value should fatal 1, got exited=%v code=%d", exited, code)
+	// Both the space form with nothing after it and an explicit-but-empty
+	// "--to=" must be rejected ("--to=" would otherwise silently mean auto).
+	for _, args := range [][]string{{"--to"}, {"--to=", "in.prproj"}} {
+		code, exited, _, stderr := runCaptured(t, func() int { return run(args) })
+		if !exited || code != 1 {
+			t.Errorf("%v: --to without a value should fatal 1, got exited=%v code=%d", args, exited, code)
+		}
+		if !strings.Contains(stderr, "--to requires a value") {
+			t.Errorf("%v: missing diagnostic:\n%s", args, stderr)
+		}
 	}
-	if !strings.Contains(stderr, "--to requires a value") {
-		t.Errorf("missing diagnostic:\n%s", stderr)
+}
+
+// One corrupt project in a multi-file batch must fail only that file: the rest
+// still convert, the process does not exit, and the corrupt one is named.
+func TestRunBatchContinuesPastCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	// Recognisably a Premiere file, but structurally corrupt (no <Project> tag).
+	bad := filepath.Join(dir, "bad.prproj")
+	if err := os.WriteFile(bad, []byte(`<PremiereData Version="3"></PremiereData>`), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	good := filepath.Join(dir, "good.prproj")
+	const xml = `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`
+	if err := os.WriteFile(good, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+
+	// The corrupt file comes first, so a hard exit there would skip the good one.
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"--to=2023", bad, good}) })
+	if exited {
+		t.Fatal("a corrupt batch member must not abort the process")
+	}
+	if code != 1 {
+		t.Errorf("batch with a failure should return 1, got %d", code)
+	}
+	if !strings.Contains(stderr, "bad.prproj") {
+		t.Errorf("the corrupt file is not named in the diagnostic:\n%s", stderr)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(good, ".prproj") + "_downgraded.prproj"); err != nil {
+		t.Errorf("the good file was not converted after the corrupt one failed: %v", err)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(bad, ".prproj") + "_downgraded.prproj"); err == nil {
+		t.Error("no output should be written for the corrupt file")
 	}
 }
 
