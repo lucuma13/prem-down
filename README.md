@@ -36,7 +36,7 @@ The tool is available on the context menu (right-click on any Premiere Pro proje
 Downgrade any project to the previous release:
 
 * macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade for older Premiere"
-* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Downgrade for older Premiere"
+* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade for older Premiere"
 
 #### CLI (Terminal)
 
