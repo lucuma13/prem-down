@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -163,6 +164,10 @@ func TestParseXMLRenderRoundTrip(t *testing.T) {
 </Root>`,
 		`plain text with no tags`,
 		`<Solo Version="1"/>`,
+		// A "<...>" token whose first char isn't a name char (leading space) is
+		// not a tag: parseXML passes it through as literal text, and it must
+		// still round-trip. Exercises the tagNameRe no-match branch.
+		`before < not a tag > after`,
 	}
 	for _, in := range inputs {
 		var b strings.Builder
@@ -370,6 +375,131 @@ func TestDowngradeReturnsErrorForNonPremiereFile(t *testing.T) {
 	}
 }
 
+// downgrade refuses a --to at or above the source release rather than stamping
+// a higher version — it is a downgrader, so target >= source is user error.
+// The error is returned (not fatal) so a batch caller can keep going, and no
+// output file is written.
+func TestDowngradeRejectsTargetNotBelowSource(t *testing.T) {
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.prproj")
+	// Equal to the source is refused just like above it.
+	if err := downgrade(src, out, 42, false); err == nil {
+		t.Fatal("expected an error for a target not below the source, got nil")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written when the target is rejected")
+	}
+}
+
+// With auto-target (projectVersion == 0) on a source already at the oldest known
+// release, there is no earlier release to pick, so downgrade returns an error
+// rather than exiting.
+func TestDowngradeAutoTargetNoEarlierRelease(t *testing.T) {
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="22">
+</Project>
+</PremiereData>`
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.prproj")
+	err := downgrade(src, out, 0, false)
+	if err == nil {
+		t.Fatal("expected an error when the source has no earlier release, got nil")
+	}
+	if !strings.Contains(err.Error(), "no known earlier release") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written when there is no target release")
+	}
+}
+
+// A file that starts with the gzip magic bytes but isn't valid gzip is reported
+// as an operational error (from the decompressor), not a hard exit.
+func TestDowngradeCorruptGzip(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	// gzip magic (0x1f 0x8b) followed by a truncated/invalid stream.
+	if err := os.WriteFile(src, []byte{0x1f, 0x8b, 0x08, 0x00}, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.prproj")
+	if err := downgrade(src, out, 43, false); err == nil {
+		t.Fatal("expected an error for a corrupt gzip source, got nil")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written for a corrupt gzip source")
+	}
+}
+
+// downgrade surfaces a read failure (rather than exiting) so a batch caller can
+// report it and continue. A directory passed as the source makes os.ReadFile
+// fail.
+func TestDowngradeReadError(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.prproj")
+	if err := downgrade(dir, out, 43, false); err == nil {
+		t.Fatal("expected a read error when the source is a directory, got nil")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written when the source can't be read")
+	}
+}
+
+// A gzip stream with an intact header but a corrupted body passes gzip.NewReader
+// and fails later in io.ReadAll (a distinct branch from the bad-header case).
+func TestDowngradeCorruptGzipBody(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write([]byte(`<PremiereData Version="3"><Project ObjectID="1" ClassID="y" Version="45"></Project></PremiereData>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	raw[len(raw)/2] ^= 0xFF // corrupt the deflate body, leaving the header intact
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, raw, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.prproj")
+	if err := downgrade(src, out, 43, false); err == nil {
+		t.Fatal("expected a decompression error for a corrupt gzip body, got nil")
+	}
+}
+
+// downgrade returns the write failure (rather than exiting) when the output path
+// is unwritable — here its parent directory does not exist.
+func TestDowngradeWriteError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "no-such-dir", "out.prproj")
+	if err := downgrade(src, dst, 41, false); err == nil {
+		t.Fatal("expected a write error for an unwritable destination, got nil")
+	}
+}
+
 func gunzipFile(t *testing.T, path string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is a test-controlled temp file
@@ -449,5 +579,292 @@ func TestDowngrade2026Fixture(t *testing.T) {
 	}
 	if colorOverrides == 0 {
 		t.Error("expected at least one Lumetri color-class param in the fixture")
+	}
+}
+
+// --------------------------------------------------------------------------
+// Exit-path coverage. fatal() and main() end the process via os.Exit, so they
+// are routed through the osExit seam; runCaptured stubs it (aborting via panic,
+// as a real exit would abort the process) and redirects stdout/stderr, making
+// every fatal branch and the whole run() arg parser reachable in-process.
+// --------------------------------------------------------------------------
+
+// exitPanic is what the stubbed osExit panics with, so a fatal() path unwinds
+// back to runCaptured instead of continuing past the point the real os.Exit
+// would have ended the process.
+type exitPanic struct{ code int }
+
+// runCaptured invokes fn with osExit stubbed and os.Stdout/os.Stderr redirected.
+// It returns fn's own return value (or the code passed to a fatal exit), whether
+// fn exited via fatal, and the captured stdout and stderr.
+func runCaptured(t *testing.T, fn func() int) (code int, exited bool, stdout, stderr string) {
+	t.Helper()
+	origExit, origOut, origErr := osExit, os.Stdout, os.Stderr
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout, os.Stderr = outW, errW
+	osExit = func(c int) { panic(exitPanic{c}) }
+
+	// Drain both pipes concurrently. macOS pipes start with a small buffer, so a
+	// usage/fatal-sized write would block the writer if we only read after fn
+	// returned — deadlocking the test.
+	var outBuf, errBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = io.Copy(&outBuf, outR) }()
+	go func() { defer wg.Done(); _, _ = io.Copy(&errBuf, errR) }()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ep, ok := r.(exitPanic)
+				if !ok {
+					panic(r) // a real bug, not a stubbed exit — re-raise
+				}
+				code, exited = ep.code, true
+			}
+		}()
+		code = fn()
+	}()
+
+	os.Stdout, os.Stderr, osExit = origOut, origErr, origExit
+	_ = outW.Close()
+	_ = errW.Close()
+	wg.Wait()
+	return code, exited, outBuf.String(), errBuf.String()
+}
+
+// Every helper that reports a corrupt/unrecognised document does so via fatal
+// (a hard exit), since it means a malformed input rather than an ordinary skip.
+// Each must exit 1 and name the problem.
+
+func TestResolveReleaseUnknownExits(t *testing.T) {
+	code, exited, _, stderr := runCaptured(t, func() int { return resolveRelease("NoSuchRelease") })
+	if !exited || code != 1 {
+		t.Fatalf("unknown release should fatal with code 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "unknown release") {
+		t.Errorf("missing diagnostic: %q", stderr)
+	}
+}
+
+func TestParseXMLFatalCases(t *testing.T) {
+	cases := map[string]string{
+		"unbalanced close": `</Orphan>`,
+		"mismatched close": `<A Version="1"></B>`,
+		"never closed":     `<A Version="1">text`,
+	}
+	for name, in := range cases {
+		code, exited, _, stderr := runCaptured(t, func() int { parseXML(in); return 0 })
+		if !exited || code != 1 {
+			t.Errorf("%s: expected fatal exit 1, got exited=%v code=%d", name, exited, code)
+		}
+		if !strings.Contains(strings.ToLower(stderr), "xml") {
+			t.Errorf("%s: missing XML diagnostic: %q", name, stderr)
+		}
+	}
+}
+
+func TestSetProjectVersionWrongCountExits(t *testing.T) {
+	cases := map[string]string{
+		"zero matches": `<PremiereData Version="3"></PremiereData>`,
+		"two matches":  `<Project ObjectID="1" Version="45"><Project ObjectID="1" Version="45">`,
+	}
+	for name, xml := range cases {
+		code, exited, _, stderr := runCaptured(t, func() int { setProjectVersion(xml, 43); return 0 })
+		if !exited || code != 1 {
+			t.Errorf("%s: expected fatal exit 1, got exited=%v code=%d", name, exited, code)
+		}
+		if !strings.Contains(stderr, "exactly one") {
+			t.Errorf("%s: missing diagnostic: %q", name, stderr)
+		}
+	}
+}
+
+func TestGetProjectVersionExits(t *testing.T) {
+	// No <Project ObjectID="1"> tag at all -> no regex match.
+	code, exited, _, stderr := runCaptured(t, func() int { getProjectVersion("<PremiereData/>"); return 0 })
+	if !exited || code != 1 {
+		t.Errorf("absent project tag should fatal 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "could not find") {
+		t.Errorf("missing diagnostic: %q", stderr)
+	}
+
+	// The regex only captures digits, so the only way to reach the Atoi error is
+	// a version with more digits than an int can hold (a range error).
+	huge := `<Project ObjectID="1" ClassID="y" Version="` + strings.Repeat("9", 40) + `">`
+	code, exited, _, stderr = runCaptured(t, func() int { getProjectVersion(huge); return 0 })
+	if !exited || code != 1 {
+		t.Errorf("over-long version should fatal 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "invalid") {
+		t.Errorf("missing diagnostic: %q", stderr)
+	}
+}
+
+// --------------------------------------------------------------------------
+// run() — the CLI arg parser and dispatch, exercised through the exit seam.
+// --------------------------------------------------------------------------
+
+func TestRunHelpAndVersion(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		code, exited, stdout, _ := runCaptured(t, func() int { return run([]string{arg}) })
+		if exited || code != 0 {
+			t.Errorf("%s: want clean exit 0, got exited=%v code=%d", arg, exited, code)
+		}
+		if !strings.Contains(stdout, "Usage: prem-down") {
+			t.Errorf("%s: help not printed:\n%s", arg, stdout)
+		}
+	}
+	code, exited, stdout, _ := runCaptured(t, func() int { return run([]string{"--version"}) })
+	if exited || code != 0 {
+		t.Errorf("--version: want 0, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stdout, "prem-down "+version) {
+		t.Errorf("--version not printed: %q", stdout)
+	}
+}
+
+func TestRunNoPositionalsReturns2(t *testing.T) {
+	// A flag but no input file: usage to stderr, exit code 2.
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"-v"}) })
+	if exited || code != 2 {
+		t.Errorf("no input files should return 2, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "Usage:") {
+		t.Errorf("usage not printed to stderr:\n%s", stderr)
+	}
+}
+
+func TestRunUnknownOptionExits(t *testing.T) {
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"--nope"}) })
+	if !exited || code != 1 {
+		t.Errorf("unknown option should fatal 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "unknown option") {
+		t.Errorf("missing diagnostic:\n%s", stderr)
+	}
+}
+
+func TestRunToRequiresValueExits(t *testing.T) {
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"--to"}) })
+	if !exited || code != 1 {
+		t.Errorf("--to without a value should fatal 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "--to requires a value") {
+		t.Errorf("missing diagnostic:\n%s", stderr)
+	}
+}
+
+func TestRunMissingFileReturns1(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.prproj")
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{missing}) })
+	if exited || code != 1 {
+		t.Errorf("a missing input should return 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "not found") {
+		t.Errorf("missing diagnostic:\n%s", stderr)
+	}
+}
+
+// The success path: --to= form, verbose, and a two-file batch each written next
+// to its original. Covers the parse loop, resolveRelease, the per-file Stat +
+// downgrade loop, and the return-0 tail.
+func TestRunBatchSuccess(t *testing.T) {
+	dir := t.TempDir()
+	const xml = `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`
+	var inputs []string
+	for _, n := range []string{"a.prproj", "b.prproj"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+			t.Fatal(err)
+		}
+		inputs = append(inputs, p)
+	}
+	args := append([]string{"--to=2023", "-v"}, inputs...)
+	code, exited, stdout, _ := runCaptured(t, func() int { return run(args) })
+	if exited || code != 0 {
+		t.Fatalf("batch should succeed with 0, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stdout, "wrote ") {
+		t.Errorf("no downgrade output:\n%s", stdout)
+	}
+	for _, in := range inputs {
+		out := strings.TrimSuffix(in, ".prproj") + "_downgraded.prproj"
+		if _, err := os.Stat(out); err != nil {
+			t.Errorf("expected output %s to be written: %v", out, err)
+		}
+	}
+}
+
+// --gui makes run wait for Enter before returning (the OS context menu opens a
+// console that would otherwise vanish). Feed a newline via stdin so the pause
+// returns; this covers the guiMode branch of pauseIfGUI.
+func TestRunGUIPauses(t *testing.T) {
+	origStdin, origGUI := os.Stdin, guiMode
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+	_, _ = w.WriteString("\n")
+	_ = w.Close()
+	t.Cleanup(func() { os.Stdin = origStdin; guiMode = origGUI })
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(`<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	code, exited, _, _ := runCaptured(t, func() int { return run([]string{"--gui", "--to=2023", src}) })
+	if exited || code != 0 {
+		t.Fatalf("gui run should return 0, got exited=%v code=%d", exited, code)
+	}
+	if !guiMode {
+		t.Error("--gui should have set guiMode")
+	}
+}
+
+// The space-separated "--to RELEASE" form (distinct from "--to="), combined with
+// an input that exists but isn't a Premiere project: downgrade fails, run reports
+// it and returns 1 without exiting.
+func TestRunToSpaceFormAndDowngradeError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "notes.prproj")
+	if err := os.WriteFile(src, []byte("not a premiere project"), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	code, exited, _, stderr := runCaptured(t, func() int { return run([]string{"--to", "2023", src}) })
+	if exited || code != 1 {
+		t.Fatalf("a failed downgrade should return 1, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("downgrade failure not reported:\n%s", stderr)
+	}
+}
+
+// run dispatches the "integrate" subcommand; --help there is a clean no-op.
+// HOME points at a temp dir so nothing touches the real Services folder.
+func TestRunIntegrateDispatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	code, exited, stdout, _ := runCaptured(t, func() int { return run([]string{"integrate", "-h"}) })
+	if exited || code != 0 {
+		t.Fatalf("integrate -h should return 0, got exited=%v code=%d", exited, code)
+	}
+	if !strings.Contains(stdout, "integrate") {
+		t.Errorf("integrate help not printed:\n%s", stdout)
 	}
 }
