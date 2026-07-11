@@ -127,22 +127,28 @@ jobs:
           $exe = 'C:\Program Files\prem-down\prem-down.exe'
           & $exe --version
           if ($LASTEXITCODE -ne 0) { throw 'installed exe does not run' }
-          reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down\command'
-          if ($LASTEXITCODE -ne 0) { throw 'context-menu registry key missing after install' }
+          reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down\DropTarget' /v CLSID
+          if ($LASTEXITCODE -ne 0) { throw 'context-menu DropTarget CLSID missing after install' }
+          reg query 'HKLM\SOFTWARE\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}\LocalServer32'
+          if ($LASTEXITCODE -ne 0) { throw 'COM LocalServer registration missing after install' }
       - name: Exercise integrate subcommand (HKCU wiring)
         shell: pwsh
         run: |
           $exe = 'C:\Program Files\prem-down\prem-down.exe'
           & $exe integrate
           if ($LASTEXITCODE -ne 0) { throw 'integrate failed' }
-          reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down\command'
-          if ($LASTEXITCODE -ne 0) { throw 'HKCU context-menu key missing after integrate' }
+          reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down\DropTarget' /v CLSID
+          if ($LASTEXITCODE -ne 0) { throw 'HKCU DropTarget CLSID missing after integrate' }
+          reg query 'HKCU\Software\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}\LocalServer32'
+          if ($LASTEXITCODE -ne 0) { throw 'HKCU COM LocalServer registration missing after integrate' }
           & $exe integrate --remove
           if ($LASTEXITCODE -ne 0) { throw 'integrate --remove failed' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'HKCU context-menu key still present after --remove' }
-          # The reg query above exits 1 (key absent) as the success case; reset so
-          # the pwsh step doesn't inherit that non-zero code as its own exit status.
+          reg query 'HKCU\Software\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}' 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'HKCU CLSID registration still present after --remove' }
+          # The absent-key reg queries above exit 1 (key absent) as the success case;
+          # reset so the pwsh step doesn't inherit that non-zero code as its exit status.
           exit 0
       - name: Uninstall MSI and verify cleanup
         shell: pwsh
@@ -152,7 +158,9 @@ jobs:
           if (Test-Path 'C:\Program Files\prem-down\prem-down.exe') { throw 'exe still present after uninstall' }
           reg query 'HKLM\SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'context-menu registry key still present after uninstall' }
-          # As above: the absent-key reg query exits 1 as success; reset the step's exit code.
+          reg query 'HKLM\SOFTWARE\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}' 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'COM CLSID registration still present after uninstall' }
+          # As above: the absent-key reg queries exit 1 as success; reset the step's exit code.
           exit 0
   test:
     name: Tests (${{ matrix.os }})
