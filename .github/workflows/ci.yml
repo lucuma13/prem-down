@@ -131,6 +131,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'context-menu DropTarget CLSID missing after install' }
           reg query 'HKLM\SOFTWARE\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}\LocalServer32'
           if ($LASTEXITCODE -ne 0) { throw 'COM LocalServer registration missing after install' }
+      - name: Smoke-test COM server activation (-Embedding)
+        shell: pwsh
+        run: |
+          $p = Start-Process 'C:\Program Files\prem-down\prem-down.exe' -ArgumentList '-Embedding' -PassThru
+          Start-Sleep -Seconds 3
+          if ($p.HasExited) { throw "COM server exited during startup/registration (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
       - name: Exercise integrate subcommand (HKCU wiring)
         shell: pwsh
         run: |
