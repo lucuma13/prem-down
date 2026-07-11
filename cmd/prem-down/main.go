@@ -651,7 +651,7 @@ func run(args []string) int {
 			if i >= len(args) {
 				fatal("error: --to requires a value")
 			}
-			to = args[i]
+			to = args[i] //nolint:gosec // G602: the i >= len(args) guard above exits via fatal, so i is in range here
 		case strings.HasPrefix(a, "--to="):
 			to = strings.TrimPrefix(a, "--to=")
 		case a == "-v" || a == "--verbose":

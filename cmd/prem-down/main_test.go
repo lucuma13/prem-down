@@ -823,10 +823,11 @@ func TestRunGUIPauses(t *testing.T) {
 
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, []byte(`<PremiereData Version="3">
+	const xml = `<PremiereData Version="3">
 <Project ObjectID="1" ClassID="y" Version="42">
 </Project>
-</PremiereData>`), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+</PremiereData>`
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
 		t.Fatal(err)
 	}
 	code, exited, _, _ := runCaptured(t, func() int { return run([]string{"--gui", "--to=2023", src}) })
