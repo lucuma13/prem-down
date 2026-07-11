@@ -164,10 +164,15 @@ func pauseIfGUI() {
 	_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
 }
 
+// osExit is the process-exit seam used by fatal (and main). Tests replace it so
+// a fatal path can be exercised in-process — aborting the caller via panic —
+// instead of killing the test binary.
+var osExit = os.Exit
+
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	pauseIfGUI()
-	os.Exit(1)
+	osExit(1)
 }
 
 // releaseNames lists the known releases newest-first (releases is stored
@@ -611,16 +616,22 @@ Subcommands:
 }
 
 func main() {
-	args := os.Args[1:]
+	osExit(run(os.Args[1:]))
+}
+
+// run holds main's logic, split out so it can be tested: it returns the process
+// exit code instead of calling os.Exit, and user-error paths still abort through
+// fatal (which calls the osExit seam). main is then a one-line shim.
+func run(args []string) int {
 	// When Explorer activates prem-down as the Drop Target COM server (Windows
 	// only; "-Embedding"), it takes over completely: it collects the selected
 	// files and relaunches prem-down --gui on them. See droptarget_windows.go.
 	if maybeRunCOMServer(args) {
-		return
+		return 0
 	}
 	if len(args) > 0 && args[0] == "integrate" {
 		integrateMain(args[1:])
-		return
+		return 0
 	}
 
 	var positionals []string
@@ -631,10 +642,10 @@ func main() {
 		switch {
 		case a == "-h" || a == "--help":
 			usage(os.Stdout)
-			return
+			return 0
 		case a == "--version":
 			fmt.Printf("prem-down %s\n", version)
-			return
+			return 0
 		case a == "--to":
 			i++
 			if i >= len(args) {
@@ -656,7 +667,7 @@ func main() {
 	}
 	if len(positionals) == 0 {
 		usage(os.Stderr)
-		os.Exit(2)
+		return 2
 	}
 
 	// Explicit --to is resolved and validated up front; auto (empty) is deferred
@@ -689,6 +700,7 @@ func main() {
 	}
 	pauseIfGUI()
 	if failed {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
