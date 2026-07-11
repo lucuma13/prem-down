@@ -268,13 +268,13 @@ var (
 )
 
 // formatEtc / stgMedium mirror the Win32 structs; Go inserts the same alignment
-// padding the C layouts have on amd64 (ptd and hGlobal land on 8-byte offsets).
+// padding the C layouts have on amd64 (the DVTARGETDEVICE* and hGlobal land on 8-byte offsets).
 // Fields we neither set nor read — the target-device pointer and the fields the
 // shell fills in and ReleaseStgMedium consumes — are blank so they hold their
 // place in the layout without tripping the unused-field check.
 type formatEtc struct {
 	cfFormat uint16
-	_        uintptr // ptd (DVTARGETDEVICE*, left NULL)
+	_        uintptr // DVTARGETDEVICE* target-device pointer, left NULL
 	dwAspect uint32
 	lindex   int32
 	tymed    uint32
