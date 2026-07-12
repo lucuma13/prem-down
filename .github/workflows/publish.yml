@@ -1,6 +1,6 @@
 ---
 name: Publish
-run-name: Publish - Release ${{ github.ref_name }}
+run-name: Publish version ${{ github.ref_name }}
 "on":
   release:
     types: [published]
