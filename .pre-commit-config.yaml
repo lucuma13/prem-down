@@ -36,10 +36,7 @@ repos:
       - id: yamllint
         args:
           - --config-data
-          # line-length is a warning, not an error: the powershell stack's `entry:`
-          # one-liners cannot be broken under 120 chars. truthy.check-keys is off
-          # so a workflow may write `on:` unquoted.
-          - "{extends: default, rules: {line-length: {max: 120, level: warning}, comments: {min-spaces-from-content: 1}, truthy: {check-keys: false}}}"
+          - "{extends: default, rules: {line-length: {max: 120, level: warning}, comments: {min-spaces-from-content: 1}}}"
   # GitHub workflow schema validation
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: 0.37.4
