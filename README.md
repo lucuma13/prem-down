@@ -17,7 +17,7 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 1. Download the [macOS installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_macos.pkg) and open it. If macOS refuses to open it go to "System Settings > Privacy & Security", scroll to the message about the prem-down installer and click "Open Anyway".
 
-2. Alternatively, install with [Homebrew](https://brew.sh/): `brew tap lucuma13/dit && brew install prem-down`
+2. Alternatively, install with [Homebrew](https://brew.sh/): `brew install lucuma13/dit/prem-down`
 
 3. Check that the action is now available when right-clicking a Premiere Pro project file (.prproj), under "Quick Actions > Downgrade for older Premiere". If it isn't, switch it on manually with "Quick Actions > Customise…"
 
