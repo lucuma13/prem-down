@@ -1,6 +1,6 @@
 ---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
-# Template: __VERSION__ is filled in by the windows-installer job in release.yml.
+# Template: __VERSION__ is filled in by the publish-windows-installer job in publish.yml.
 PackageIdentifier: lucuma13.prem-down
 PackageVersion: "__VERSION__"
 PackageLocale: en-US

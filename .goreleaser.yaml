@@ -18,7 +18,7 @@ archives:
   - name_template: '{{ .ProjectName }}_binary_macos_{{ .Arch }}'
     formats: [tar.gz]
 # No checksums.txt: it would cover only the macOS tarballs, not the MSI (built
-# in a separate release.yml job).
+# in a separate publish.yml job).
 checksum:
   disable: true
 changelog:
@@ -62,7 +62,7 @@ homebrew_casks:
           end
 # Windows is NOT built or published from here: it ships only as an MSI (so the
 # Explorer context menu installs/uninstalls with the package), which GoReleaser
-# cannot build. The windows-installer job in release.yml compiles the Windows
+# cannot build. The publish-windows-installer job in publish.yml compiles the Windows
 # binary itself, wraps it in an MSI with WiX from packaging/windows/prem-down.wxs,
 # uploads the MSI to the GitHub release, and opens the manifest PR against
 # microsoft/winget-pkgs from packaging/winget/.

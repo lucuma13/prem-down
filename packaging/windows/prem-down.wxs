@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Windows installer for prem-down, built with WiX (v4+ schema) by the
-  windows-installer job in release.yml:
+  publish-windows-installer job in publish.yml:
 
     wix build packaging/windows/prem-down.wxs -arch x64 \
       -d Version=<x.y.z> -d ExeDir=<dir containing prem-down.exe> \
