@@ -1,12 +1,16 @@
 ---
-name: Release
-run-name: Release ${{ github.ref_name }}
-on:
-  push:
-    tags: ["[0-9]*"]
+name: Publish
+run-name: Publish - Release ${{ github.ref_name }}
+"on":
+  release:
+    types: [published]
+concurrency:
+  group: publish
+  cancel-in-progress: true
 permissions: {}
 jobs:
-  release:
+  publish-macos-archives:
+    name: macOS archives (GitHub release + Homebrew cask)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,15 +36,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-  # Windows ships as an MSI installer so the Explorer context menu, PATH entry
-  # and uninstaller come with the package. GoReleaser builds neither the Windows
-  # binary nor MSIs, so this job does both: it compiles the Windows exe, wraps
-  # it with WiX (packaging/windows/prem-down.wxs), publishes the MSI as a
+  # Windows ships as an MSI installer so the File Explorer context menu, PATH
+  # entry and uninstaller come with the package. GoReleaser builds neither the
+  # Windows binary nor MSIs, so this job does both: it compiles the Windows exe,
+  # wraps it with WiX (packaging/windows/prem-down.wxs), publishes the MSI as a
   # release asset (the direct-download path for editors without winget), and
   # opens the manifest PR against microsoft/winget-pkgs.
-  windows-installer:
-    name: Windows installer
-    needs: [release]
+  publish-windows-installer:
+    name: Windows installer (GitHub release + winget)
+    needs: [publish-macos-archives]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -123,17 +127,16 @@ jobs:
             --head "lucuma13:prem-down-$TAG" \
             --title "New version: lucuma13.prem-down version $TAG" \
             --body "Automated submission from https://github.com/lucuma13/prem-down/releases/tag/$TAG"
-  # macOS ships an optional .pkg installer alongside the Homebrew cask, for
-  # non-technical users who would rather not touch a terminal: it drops a
-  # universal prem-down binary in /usr/local/bin (on the default PATH) and its
+  # macOS ships an optional .pkg installer alongside the Homebrew cask: it drops
+  # a universal binary in /usr/local/bin (on the default PATH) and its
   # postinstall installs the Finder Quick Action for the logged-in user. It is
   # unsigned, so first open needs the Gatekeeper override (see the README); the
   # cask stays the frictionless path. GoReleaser only builds the tarballs (for
   # the cask), so this job builds the universal binary and wraps it with
   # pkgbuild (packaging/macos/scripts/postinstall).
-  macos-installer:
-    name: macOS installer
-    needs: [release]
+  publish-macos-installer:
+    name: macOS installer (GitHub release)
+    needs: [publish-macos-archives]
     runs-on: macos-latest
     permissions:
       contents: write
