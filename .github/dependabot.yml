@@ -1,16 +1,6 @@
 ---
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: "/"
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -29,5 +19,15 @@ updates:
       default-days: 7
     groups:
       pre-commit-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      go-dependencies:
         patterns:
           - "*"
