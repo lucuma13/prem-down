@@ -14,15 +14,44 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: mixed-line-ending
+        args: [--fix=lf]
       - id: trailing-whitespace
         exclude: \.md$
   # Spellcheck
   - repo: https://github.com/crate-ci/typos
-    rev: v1.48.0 # pin to a concrete release; v1 is a mutable rolling tag
+    rev: v1.48.0
     hooks:
       - id: typos
         args: [--force-exclude] # Flag only: removed default --write-changes
-  # Go multi-linter engine (includes formatter and other extras)
+  # YAML formatter
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
+    hooks:
+      - id: yamlfmt
+        args: ["-formatter", "include_document_start=true,line_length=120"]
+  # YAML linter
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args:
+          - --config-data
+          # line-length is a warning, not an error: the powershell stack's `entry:`
+          # one-liners cannot be broken under 120 chars. truthy.check-keys is off
+          # so a workflow may write `on:` unquoted.
+          - "{extends: default, rules: {line-length: {max: 120, level: warning}, comments: {min-spaces-from-content: 1}, truthy: {check-keys: false}}}"
+  # GitHub workflow schema validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.37.4
+    hooks:
+      - id: check-github-workflows
+        args: ["--verbose"]
+  # CI security auditing
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.26.1
+    hooks:
+      - id: zizmor
+  # Go formatter and linter
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.12.2
     hooks:
@@ -48,28 +77,3 @@ repos:
         language: system
         files: \.go$
         pass_filenames: false
-  # YAML formatter
-  - repo: https://github.com/google/yamlfmt
-    rev: v0.21.0
-    hooks:
-      - id: yamlfmt
-        args: ["-formatter", "include_document_start=true,line_length=120"]
-  # YAML linter
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
-    hooks:
-      - id: yamllint
-        args:
-          - --config-data
-          - "{extends: default, rules: {line-length: {max: 120}, comments: {min-spaces-from-content: 1}, truthy: {check-keys: false}}}" # yamllint disable-line rule:line-length
-  # GitHub workflow schema validation
-  - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.37.4
-    hooks:
-      - id: check-github-workflows
-        args: [--verbose]
-  # CI security auditing
-  - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.26.1
-    hooks:
-      - id: zizmor
