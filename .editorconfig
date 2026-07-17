@@ -13,7 +13,7 @@ trim_trailing_whitespace = false
 [*.mhl]
 insert_final_newline = unset
 
-[*.{py,ps1}]
+[*.{py,ps1,swift}]
 indent_size = 4
 
 [*.{toml,yaml,yml,sh,bash,bats}]
