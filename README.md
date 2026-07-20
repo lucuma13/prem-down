@@ -1,12 +1,10 @@
-# <img src="docs/assets/prem-down.svg" width="30" align="absbottom"/> prem-down
+<img src="docs/assets/prem-down_banner.svg" width=100%/>
 
 ![OS](https://img.shields.io/badge/OS-macOS%20%7C%20Windows-lightgrey)
 [![CI](https://github.com/lucuma13/prem-down/actions/workflows/ci.yml/badge.svg)](https://github.com/lucuma13/prem-down/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/lucuma13/prem-down/graph/badge.svg?token=GU64739473)](https://codecov.io/gh/lucuma13/prem-down)
 
-`prem-down` downgrades an Adobe Premiere Pro project file so an older version of Premiere can open it.
-
-Operation runs completely **offline and local** to your machine – no data is ever uploaded to the internet.
+`prem-down` downgrades an Adobe Premiere Pro project file so an older version of Premiere can open it. It runs completely **offline and local** to your machine – no data is ever uploaded to the internet.
 
 It fully supports the breaking changes introduced with **Premiere Pro 2026**. The well-known method (gunzip the .prproj, lower the top-level project version, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation — it drops fields that older releases expect present (and report the project as damaged if they are absent). So the fix is bifold: re-insert those required fields, and set the project version to the target release.
 
