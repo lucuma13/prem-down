@@ -37,16 +37,23 @@ func writeFile(t *testing.T, path, content string) string {
 	return path
 }
 
+// A .prin is Premiere's gzip-compressed sidecar that sits next to a .prproj. It
+// is not a project, so a Production downgrade must copy it verbatim — and the
+// gzip magic in its first bytes must NOT trip the .prproj gzip path (that path
+// is reached by extension, never by sniffing). The leading 1f 8b here guards
+// exactly that: a gzip-magic sidecar copied byte-for-byte, not decompressed.
+const prinSidecar = "\x1f\x8b\x08\x00binary sidecar\xff"
+
 // newProduction lays out a Production: settings file at the top, a project
-// beside it, a project nested a folder down, and a non-project file that must
-// survive the trip byte-for-byte.
+// beside it, a project nested a folder down, and a .prin sidecar next to that
+// nested project (as Premiere writes them) that must survive byte-for-byte.
 func newProduction(t *testing.T, name string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
 	writeFile(t, filepath.Join(dir, name+prodsetExt), prodset2026)
 	writeFile(t, filepath.Join(dir, "Untitled"+prprojExt), prodProject)
 	writeFile(t, filepath.Join(dir, "subfolder", "nested"+prprojExt), prodProject)
-	writeFile(t, filepath.Join(dir, "media", "clip.mov"), "\x00\x01binary media\xff")
+	writeFile(t, filepath.Join(dir, "subfolder", "nested.prin"), prinSidecar)
 	return dir
 }
 
@@ -208,10 +215,9 @@ func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 			t.Errorf("%s: version = %d, want 43", rel, v)
 		}
 	}
-	// Non-project files are the reason the copy is worth making: non-project files inside a
-	// Production must arrive bit-identical or the copy is not usable.
-	if got, want := readFile(t, filepath.Join(dst, "media", "clip.mov")), "\x00\x01binary media\xff"; got != want {
-		t.Errorf("media not copied verbatim: %q", got)
+	// A .prin next to a project must arrive bit-identical
+	if got, want := readFile(t, filepath.Join(dst, "subfolder", "nested.prin")), prinSidecar; got != want {
+		t.Errorf("sidecar not copied verbatim: %q", got)
 	}
 	// The source is an input, never an output.
 	if got := readFile(t, filepath.Join(src, "MyProduction"+prodsetExt)); got != prodset2026 {
@@ -498,19 +504,20 @@ func TestDowngradeProductionReportsPartialFailure(t *testing.T) {
 // outside the Production is not silently inlined into the copy.
 func TestDowngradeProductionPreservesSymlinks(t *testing.T) {
 	src := newProduction(t, "Links")
-	if err := os.Symlink(filepath.Join("media", "clip.mov"), filepath.Join(src, "link.mov")); err != nil {
+	linkTarget := filepath.Join("subfolder", "nested.prin")
+	if err := os.Symlink(linkTarget, filepath.Join(src, "link.prin")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	dst := src + "_downgraded"
 	if err := dcli().downgradeProduction(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	target, err := os.Readlink(filepath.Join(dst, "link.mov"))
+	target, err := os.Readlink(filepath.Join(dst, "link.prin"))
 	if err != nil {
-		t.Fatalf("link.mov should still be a symlink: %v", err)
+		t.Fatalf("link.prin should still be a symlink: %v", err)
 	}
-	if want := filepath.Join("media", "clip.mov"); target != want {
-		t.Errorf("symlink target = %q, want %q", target, want)
+	if target != linkTarget {
+		t.Errorf("symlink target = %q, want %q", target, linkTarget)
 	}
 }
 
