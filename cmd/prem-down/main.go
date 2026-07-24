@@ -718,17 +718,16 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [input2.prproj ...] [--to RELEASE]
        prem-down integrate [--remove]
 
-Downgrade one or more Premiere Pro projects to open with an older version, each
-saved next to its original project.
+Downgrade one or more Premiere Pro projects next to the original project.
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
-  -v, --verbose   print what was changed
-      --version   show version and exit
-  -h, --help      show this help
+  -v, --verbose   print detailed logs
+      --version   show version
+  -h, --help      show this help menu
 
 Subcommands:
-  integrate       add a right-click action to %s (--remove undoes it)
+  integrate       add a right-click "Downgrade" action to %s (--remove undoes it)
 `, releaseExamples(), fileManagerName)
 }
 
