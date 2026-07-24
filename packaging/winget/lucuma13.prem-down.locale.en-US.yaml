@@ -14,10 +14,7 @@ LicenseUrl: https://github.com/lucuma13/prem-down/blob/main/LICENSE
 ShortDescription: Downgrade Premiere Pro project files so older versions can open them
 Description: |-
   prem-down downgrades an Adobe Premiere Pro project file so an older version
-  of Premiere can open it, including the breaking serialisation changes
-  introduced with Premiere Pro 2026. Installing adds a right-click
-  "Downgrade for older Premiere" entry for .prproj files in Explorer and the
-  prem-down command to PATH.
+  of Premiere can open it.
 Moniker: prem-down
 Tags:
   - adobe

@@ -728,8 +728,7 @@ Options:
   -h, --help      show this help
 
 Subcommands:
-  integrate       add a right-click "Downgrade for older Premiere" action to
-                  %s (--remove undoes it)
+  integrate       add a right-click action to %s (--remove undoes it)
 `, releaseExamples(), fileManagerName)
 }
 

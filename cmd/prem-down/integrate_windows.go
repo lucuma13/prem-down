@@ -32,7 +32,7 @@ import (
 
 const (
 	contextMenuKey   = `HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down`
-	contextMenuTitle = "Downgrade for older Premiere"
+	contextMenuTitle = "Downgrade"
 
 	// dropHandlerCLSID identifies prem-down's Drop Target COM handler. It is a
 	// fixed, private class id generated once for this project: it must stay

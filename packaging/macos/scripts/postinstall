@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installer.app runs this as root after the payload is laid down. It installs
-# the per-user Finder Quick Action ("Downgrade for older Premiere") by invoking
-# `prem-down integrate` in the logged-in user's GUI session.
+# the per-user Finder Quick Action by invoking `prem-down integrate` in the
+# logged-in user's GUI session.
 #
 # It must NOT run integrate as root: integrate writes the workflow bundle under
 # the user's ~/Library/Services and flips the per-UID `pbs` preference, so a

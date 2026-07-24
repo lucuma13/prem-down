@@ -13,15 +13,15 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 #### macOS
 
-1. Download the [macOS installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_macos.pkg) and open it. If macOS refuses to open it go to "System Settings > Privacy & Security", scroll to the message about the prem-down installer and click "Open Anyway".
+1. Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_macos.pkg) and open it. If macOS refuses to open it go to "System Settings > Privacy & Security", scroll to the message about the prem-down installer and click "Open Anyway".
 
 2. Alternatively, install with [Homebrew](https://brew.sh/): `brew install lucuma13/dit/prem-down`
 
-3. Check that the action is now available when right-clicking a Premiere Pro project file (.prproj), under "Quick Actions > Downgrade for older Premiere". If it isn't, switch it on manually with "Quick Actions > Customise…"
+3. Check that the action is now available when right-clicking a Premiere Pro project file (.prproj), under "Quick Actions > Downgrade". If it isn't, switch it on manually with "Quick Actions > Customise…"
 
 #### Windows
 
-Download the [Windows installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "More info" > "Run anyway").
+Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "More info" > "Run anyway").
 
 Alternatively, install from Terminal: `winget install -e --id lucuma13.prem-down`
 
@@ -33,8 +33,8 @@ The tool is available on the context menu (right-click on any Premiere Pro proje
 
 Downgrade any project to the previous release:
 
-* macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade for older Premiere"
-* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade for older Premiere"
+* macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade"
+* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade"
 
 #### CLI (Terminal)
 

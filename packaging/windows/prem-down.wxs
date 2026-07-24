@@ -54,7 +54,7 @@
           <RegistryKey Root="HKLM"
                        Key="SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down">
             <RegistryValue Type="string"
-                           Value="Downgrade for older Premiere" KeyPath="yes" />
+                           Value="Downgrade" KeyPath="yes" />
             <RegistryValue Type="string" Name="Icon"
                            Value="[INSTALLFOLDER]prem-down.exe" />
             <RegistryKey Key="DropTarget">
