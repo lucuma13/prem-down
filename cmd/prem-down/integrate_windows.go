@@ -1,5 +1,5 @@
 // Windows implementation of the "integrate" subcommand: a File Explorer
-// context-menu entry for .prproj files, plus the COM handler that entry points
+// context-menu entry for .prproj and .prodset files, plus the COM handler it points
 // at. This file has two halves: the installer (writes the registry keys) and
 // the Drop Target handler (runs when Explorer invokes the entry).
 //
@@ -31,8 +31,8 @@ import (
 )
 
 const (
-	contextMenuKey   = `HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down`
-	contextMenuTitle = "Downgrade"
+	contextMenuKeyRoot = `HKCU\Software\Classes\SystemFileAssociations\`
+	contextMenuTitle   = "Downgrade"
 
 	// dropHandlerCLSID identifies prem-down's Drop Target COM handler. It is a
 	// fixed, private class id generated once for this project: it must stay
@@ -46,10 +46,22 @@ const (
 	fileManagerName = "File Explorer"
 	integrationKind = "a File Explorer context-menu entry"
 
-	integrationInstalledMessage = `Installed the File Explorer context-menu entry: right-click a .prproj file and
-pick "` + contextMenuTitle + `".`
-	integrationRemovedMessage = "Removed the File Explorer context-menu entry."
+	integrationInstalledMessage = `Installed the File Explorer context-menu entries: right-click a .prproj file,
+(or a .prodset file), and pick "` + contextMenuTitle + `".`
+	integrationRemovedMessage = "Removed the File Explorer context-menu entries."
 )
+
+// contextMenuKeys are the verb keys, one per file type the entry appears on.
+//
+// A Production is a folder, but the entry is registered on its .prodset file
+// rather than on folders (a Directory verb would put "Downgrade" on every
+// folder on the machine) A .prodset only ever exists inside a Production, so
+// keying on it is both precise and discoverable — and prem-down maps the file
+// back to its folder (see plan in main.go).
+var contextMenuKeys = []string{
+	contextMenuKeyRoot + `.prproj\shell\prem-down`,
+	contextMenuKeyRoot + `.prodset\shell\prem-down`,
+}
 
 // contextMenuRegAdds returns the reg.exe argument lists that create the
 // context-menu entry. The verb is implemented as a Drop Target rather than a
@@ -61,19 +73,25 @@ pick "` + contextMenuTitle + `".`
 // enters server mode. Split out from installIntegration so the exact keys and
 // values are unit-testable without touching the registry.
 func contextMenuRegAdds(exe string) [][]string {
-	return [][]string{
-		{"add", contextMenuKey, "/ve", "/t", "REG_SZ", "/d", contextMenuTitle, "/f"},
-		{"add", contextMenuKey, "/v", "Icon", "/t", "REG_SZ", "/d", exe, "/f"},
-		{
-			"add", contextMenuKey + `\DropTarget`, "/v", "CLSID", "/t", "REG_SZ",
-			"/d", dropHandlerCLSID, "/f",
-		},
-		{"add", clsidKey, "/ve", "/t", "REG_SZ", "/d", dropHandlerName, "/f"},
-		{
+	var adds [][]string
+	// Every file type gets its own verb key, all pointing at the one handler.
+	for _, key := range contextMenuKeys {
+		adds = append(adds,
+			[]string{"add", key, "/ve", "/t", "REG_SZ", "/d", contextMenuTitle, "/f"},
+			[]string{"add", key, "/v", "Icon", "/t", "REG_SZ", "/d", exe, "/f"},
+			[]string{
+				"add", key + `\DropTarget`, "/v", "CLSID", "/t", "REG_SZ",
+				"/d", dropHandlerCLSID, "/f",
+			},
+		)
+	}
+	return append(adds,
+		[]string{"add", clsidKey, "/ve", "/t", "REG_SZ", "/d", dropHandlerName, "/f"},
+		[]string{
 			"add", clsidKey + `\LocalServer32`, "/ve", "/t", "REG_SZ",
 			"/d", fmt.Sprintf(`"%s"`, exe), "/f",
 		},
-	}
+	)
 }
 
 func installIntegration() error {
@@ -97,9 +115,10 @@ func installIntegration() error {
 
 func removeIntegration() error {
 	// Missing key means already removed: a failing reg query (key absent) is
-	// treated as success and skipped, so a double --remove stays quiet. Both the
-	// verb key and the CLSID registration are removed.
-	for _, key := range []string{contextMenuKey, clsidKey} {
+	// treated as success and skipped, so a double --remove stays quiet — as does
+	// removing an install that predates the .prodset entry. Every verb key and
+	// the CLSID registration are removed.
+	for _, key := range append(append([]string{}, contextMenuKeys...), clsidKey) {
 		if err := exec.Command("reg", "query", key).Run(); err != nil { //nolint:gosec // G204: key is one of the two package constants above, not external input
 			continue
 		}

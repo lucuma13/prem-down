@@ -12,11 +12,15 @@
 // fix is bifold: re-insert those required fields, and set the project version
 // to the target release.
 //
+// Premiere Pro Productions are supported too: passing its .prodset mirrors the
+// whole thing into a sibling "<name>_downgraded" folder. See production.go.
+//
 // Usage example:
 //
 //	```
 //	prem-down myproject.prproj
 //	prem-down a.prproj b.prproj c.prproj   # batch: each file downgraded independently
+//	prem-down MyProduction/MyProduction.prodset   # whole Production
 //	```
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
@@ -564,22 +568,22 @@ func getProjectVersion(xml string) (int, error) {
 	return v, nil
 }
 
-// uniquePath returns path if free, else the same name with a -1/-2/-3...
-// suffix. Only a successful Stat counts as taken: any Stat error (not just
-// not-exist) treats the path as free, so an unreadable directory surfaces as
-// a write error later instead of looping here forever. This check is
-// advisory — the O_EXCL open in downgrade is what actually guarantees no
-// existing file is overwritten if something claims the name in between.
-func uniquePath(path string) string {
+// uniqueName returns stem+ext if that path is free, else the same name with a
+// -1/-2/-3... suffix inserted before the extension. Only a successful Stat
+// counts as taken: any Stat error (not just not-exist) treats the path as free,
+// so an unreadable directory surfaces as a write error later instead of looping
+// here forever. This check is advisory — the O_EXCL open in writeNew (and the
+// exclusive os.Mkdir for a Production's output folder) is what actually
+// guarantees nothing existing is overwritten if something claims the name in
+// between.
+func uniqueName(stem, ext string) string {
 	taken := func(p string) bool {
 		_, err := os.Stat(p) //nolint:gosec // G703: p derives from a user-supplied CLI path; stat-ing it is the tool's purpose
 		return err == nil
 	}
-	if !taken(path) {
-		return path
+	if !taken(stem + ext) {
+		return stem + ext
 	}
-	ext := filepath.Ext(path)
-	stem := strings.TrimSuffix(path, ext)
 	for n := 1; ; n++ {
 		candidate := fmt.Sprintf("%s-%d%s", stem, n, ext)
 		if !taken(candidate) {
@@ -588,30 +592,114 @@ func uniquePath(path string) string {
 	}
 }
 
+// uniquePath is uniqueName for a file path, keeping its extension last so the
+// suffix lands on the stem ("a.prproj" -> "a-1.prproj").
+func uniquePath(path string) string {
+	ext := filepath.Ext(path)
+	return uniqueName(strings.TrimSuffix(path, ext), ext)
+}
+
+// uniqueDir is uniqueName for a directory path. Directory names are not
+// split on ".", so a Production folder called "my.big.production" suffixes to
+// "my.big.production-1" rather than "my.big-1.production".
+func uniqueDir(path string) string {
+	return uniqueName(path, "")
+}
+
+// readMaybeGzip reads a project file, transparently decompressing it when it
+// carries the gzip magic. A .prproj is always gzipped and a .prodset never is,
+// but sniffing the bytes rather than trusting the extension means either form
+// is accepted for either file.
+func readMaybeGzip(src string) ([]byte, error) {
+	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < 2 || raw[0] != 0x1f || raw[1] != 0x8b {
+		return raw, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = zr.Close() }()
+	return io.ReadAll(zr)
+}
+
+// writeNew creates dst and writes data to it, refusing to touch an existing
+// file.
+//
+// O_EXCL: the caller picked a free name, but something else may have claimed it
+// since; fail with "file exists" rather than overwrite it. Because O_EXCL means
+// we created dst, it holds nothing but our own partial output, so on any
+// failure we remove it rather than leave a truncated project sitting next to
+// the original where it could be opened by mistake.
+func writeNew(dst string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) //nolint:gosec // G302,G304: dst sits next to the user-supplied input; a project file is meant to be opened and shared, so 0644 is deliberate
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
+		return err
+	}
+	return nil
+}
+
+// notOlderError reports that the requested target is not below the source's own
+// version. On a lone file this is user error and the message says so. Inside a
+// Production it is routine — the target is resolved once from the .prodset and
+// applied to every project, so a project already at or below it simply needs
+// copying through — which is why the caller has to be able to tell this apart
+// from a real failure.
+type notOlderError struct{ target, source int }
+
+func (e *notOlderError) Error() string {
+	return fmt.Sprintf("target version %d is not below the source version %d; "+
+		"--to must name an older release", e.target, e.source)
+}
+
+// resolveTarget turns the requested target into a concrete XML <Project>
+// Version for a source at sourceVersion. A request of 0 means "auto": take the
+// release one step below the source, which is the default when no --to is
+// given. Anything else is checked against the source, because this is a
+// downgrader — an explicit --to at or above the source release is almost
+// certainly user error, so refuse rather than stamp a higher version.
+func (c *cli) resolveTarget(sourceVersion, requested int, verbose bool) (int, error) {
+	if requested != 0 {
+		if requested >= sourceVersion {
+			return 0, &notOlderError{target: requested, source: sourceVersion}
+		}
+		return requested, nil
+	}
+	pv, name, ok := previousRelease(sourceVersion)
+	if !ok {
+		return 0, fmt.Errorf("source is version %d; no known earlier release to "+
+			"downgrade to (use --to to force one)", sourceVersion)
+	}
+	if verbose {
+		_, _ = fmt.Fprintf(c.out, "  auto target: source version %d -> %s (version %d)\n",
+			sourceVersion, name, pv)
+	}
+	return pv, nil
+}
+
 // downgrade converts one project file and returns an error rather than exiting,
 // so a caller processing several files can report a failure and move on to the
 // rest. Every failure is per-file — operational ones (unreadable file,
 // out-of-range target, write failure) and genuinely malformed XML alike — so
 // one corrupt project in a batch never aborts the remaining files.
 func (c *cli) downgrade(src, dst string, projectVersion int, verbose bool) error {
-	raw, err := os.ReadFile(src) //nolint:gosec // G304: src is the user-supplied input path; reading it is the tool's purpose
+	raw, err := readMaybeGzip(src)
 	if err != nil {
 		return err
 	}
-	var xml string
-	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-		zr, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return err
-		}
-		data, err := io.ReadAll(zr)
-		if err != nil {
-			return err
-		}
-		xml = string(data)
-	} else {
-		xml = string(raw)
-	}
+	xml := string(raw)
 	if !strings.Contains(xml, "<PremiereData") {
 		return fmt.Errorf("does not look like a Premiere project")
 	}
@@ -620,27 +708,9 @@ func (c *cli) downgrade(src, dst string, projectVersion int, verbose bool) error
 	if err != nil {
 		return err
 	}
-
-	// This is a downgrader: an explicit --to at or above the source release is
-	// almost certainly user error, so refuse rather than stamp a higher version.
-	if projectVersion >= sourceVersion {
-		return fmt.Errorf("target version %d is not below the source version %d; "+
-			"--to must name an older release", projectVersion, sourceVersion)
-	}
-
-	// projectVersion == 0 means "auto": target the release one step below the
-	// source (the default when no --to is given).
-	if projectVersion == 0 {
-		pv, name, ok := previousRelease(sourceVersion)
-		if !ok {
-			return fmt.Errorf("source is version %d; no known earlier release to "+
-				"downgrade to (use --to to force one)", sourceVersion)
-		}
-		projectVersion = pv
-		if verbose {
-			_, _ = fmt.Fprintf(c.out, "  auto target: source version %d -> %s (version %d)\n",
-				sourceVersion, name, pv)
-		}
+	projectVersion, err = c.resolveTarget(sourceVersion, projectVersion, verbose)
+	if err != nil {
+		return err
 	}
 
 	needsNormalize := sourceVersion > lastDenseSerialisationProjectVersion
@@ -692,33 +762,19 @@ func (c *cli) downgrade(src, dst string, projectVersion int, verbose bool) error
 	if err := zw.Close(); err != nil {
 		return err
 	}
-	// O_EXCL: uniquePath picked a free name, but something else may have
-	// claimed it since; fail with "file exists" rather than overwrite it.
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302,G304: dst sits next to the user-supplied input; the output is a project file meant to be opened/shared, so 0644 is deliberate
-	if err != nil {
-		return err
-	}
-	// O_EXCL means we created dst, so it holds nothing but our own partial
-	// output; on any failure remove it rather than leave a truncated project
-	// sitting next to the original where it could be opened by mistake.
-	if _, err := f.Write(out.Bytes()); err != nil {
-		_ = f.Close()
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
-		return err
-	}
-	_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
-	return nil
+	return writeNew(dst, out.Bytes(), 0o644)
 }
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [input2.prproj ...] [--to RELEASE]
+       prem-down production.prodset [--to RELEASE]
        prem-down integrate [--remove]
 
 Downgrade one or more Premiere Pro projects next to the original project.
+
+Given a Production's .prodset file (or the Production folder), downgrades the
+whole Production into a sibling "<name>_downgraded" folder: its settings, every
+project inside, and a verbatim copy of everything else.
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
@@ -801,27 +857,117 @@ func (c *cli) run(args []string) int {
 		targetVersion = v
 	}
 
-	// Each file is converted independently: a failure on one is reported and the
+	jobs, failed := c.plan(positionals)
+
+	// Each job is converted independently: a failure on one is reported and the
 	// rest still run, so a batch (a multi-file selection from the context menu, or
 	// a shell glob) isn't aborted by a single bad input. Exit non-zero if any
 	// failed.
-	failed := false
-	for _, input := range positionals {
-		if _, err := os.Stat(input); err != nil { //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
-			_, _ = fmt.Fprintf(c.err, "error: %s not found\n", input)
+	for _, j := range jobs {
+		if j.production {
+			dst := uniqueDir(j.path + "_downgraded")
+			if err := c.downgradeProduction(j.path, dst, targetVersion, verbose); err != nil {
+				_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
+				failed = true
+			}
+			continue
+		}
+		ext := filepath.Ext(j.path)
+		dst := uniquePath(strings.TrimSuffix(j.path, ext) + "_downgraded" + prprojExt)
+		if err := c.downgrade(j.path, dst, targetVersion, verbose); err != nil {
+			_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 			failed = true
 			continue
 		}
-		ext := filepath.Ext(input)
-		dst := uniquePath(strings.TrimSuffix(input, ext) + "_downgraded.prproj")
-		if err := c.downgrade(input, dst, targetVersion, verbose); err != nil {
-			_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", input, err)
-			failed = true
-		}
+		_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
 	}
 	c.pauseIfGUI()
 	if failed {
 		return 1
 	}
 	return 0
+}
+
+// job is one unit of work: either a lone .prproj (production false, path is the
+// file) or a whole Production (production true, path is its folder).
+type job struct {
+	path       string
+	production bool
+}
+
+// plan turns the raw positional arguments into the jobs to run, reporting
+// unusable inputs as it goes.
+//
+// Three things reach this function as "a Production": the folder itself, and
+// the .prodset inside it — which is what the file manager's right-click entry
+// is wired to, since there is no way to put a menu entry on Production folders
+// alone without putting it on every folder on the machine.
+//
+// The third is the habit the context menu encourages: selecting the .prodset
+// *and* the .prproj files together. Those projects are already inside the
+// Production being mirrored, so downgrading them again would scatter stray
+// _downgraded.prproj files through the user's original folder. They are dropped
+// from the plan instead, with a note saying where they were handled.
+func (c *cli) plan(positionals []string) (jobs []job, failed bool) {
+	var files []string
+	roots := map[string]bool{} // Production folder -> already planned
+
+	addProduction := func(dir string) {
+		if roots[dir] {
+			return // named twice, e.g. as both the folder and its .prodset
+		}
+		roots[dir] = true
+		jobs = append(jobs, job{path: dir, production: true})
+	}
+
+	for _, input := range positionals {
+		info, err := os.Stat(input) //nolint:gosec // G703: input is the user-supplied CLI path; stat-ing it is the tool's purpose
+		if err != nil {
+			_, _ = fmt.Fprintf(c.err, "error: %s not found\n", input)
+			failed = true
+			continue
+		}
+		switch {
+		case info.IsDir():
+			addProduction(filepath.Clean(input))
+		case strings.EqualFold(filepath.Ext(input), prodsetExt):
+			// The Production is the folder the settings file sits in.
+			addProduction(filepath.Dir(filepath.Clean(input)))
+		default:
+			files = append(files, input)
+		}
+	}
+
+	for _, f := range files {
+		if root, ok := coveredBy(f, roots); ok {
+			_, _ = fmt.Fprintf(c.out, "skipping %s: already part of the Production %s\n", f, root)
+			continue
+		}
+		jobs = append(jobs, job{path: f})
+	}
+	return jobs, failed
+}
+
+// coveredBy reports whether file lives inside one of the Production folders
+// already planned. Comparison is on absolute, cleaned paths so "./x/a.prproj"
+// and "x" are recognised as the same tree; if a path cannot be made absolute
+// the file is simply treated as uncovered and processed on its own, which is
+// the harmless outcome.
+func coveredBy(file string, roots map[string]bool) (string, bool) {
+	absFile, err := filepath.Abs(file)
+	if err != nil {
+		return "", false
+	}
+	for root := range roots {
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(absRoot, absFile)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return root, true
+	}
+	return "", false
 }

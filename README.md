@@ -8,6 +8,8 @@
 
 It fully supports the breaking changes introduced with **Premiere Pro 2026**. The well-known method (gunzip the .prproj, lower the top-level project version, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation — it drops fields that older releases expect present (and report the project as damaged if they are absent). So the fix is bifold: re-insert those required fields, and set the project version to the target release.
 
+**Premiere Pro Productions** are supported too. A Production is a folder rather than a single file, so `prem-down` copies the whole thing to a sibling `<name>_downgraded` folder – downgrading the settings file and every project inside.
+
 
 ### 🚀 Installation
 
@@ -21,17 +23,17 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 #### Windows
 
-Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "More info" > "Run anyway").
+Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "Remove protection and open").
 
 Alternatively, install from Terminal: `winget install -e --id lucuma13.prem-down`
 
 ### 📖 Usage
 
-The tool is available on the context menu (right-click on any Premiere Pro project file) or via Terminal. It creates a downgraded copy of the project file, leaving the original untouched.
+The tool is available on the context menu (right-click on any Premiere Pro project file) or via Terminal. It creates a downgraded copy, always leaving the original untouched.
 
 #### Context Menu Integration
 
-Downgrade any project to the previous release:
+Downgrade any project (.prproj) or a whole Production (.prodset) to the previous release:
 
 * macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade"
 * Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade"
@@ -46,6 +48,11 @@ prem-down myproject.prproj
 Downgrade any project to specific Premiere Pro version:
 ```sh
 prem-down myproject.prproj --to 2024
+```
+
+Downgrade a whole Production:
+```sh
+prem-down MyProduction/MyProduction.prodset
 ```
 
 If the action is ever missing (or you want to remove it before uninstalling), manage it from the Terminal:

@@ -1,12 +1,12 @@
 // The "integrate" subcommand wires prem-down into the OS file manager so
-// non-technical editors never need a terminal: right-click a .prproj and pick
-// "Downgrade".
+// non-technical editors never need a terminal: right-click a .prproj (or a
+// Production's .prodset) and pick "Downgrade".
 //
 //   - macOS: installs a Finder Quick Action into ~/Library/Services
 //     (integrate_darwin.go). The Homebrew cask runs this automatically after
 //     install and removes it before uninstall; the .pkg installer's postinstall
 //     runs it too, as the logged-in user (packaging/macos/scripts/postinstall).
-//   - Windows: adds a context-menu entry for .prproj files under HKCU
+//   - Windows: adds context-menu entries for .prproj and .prodset files under HKCU
 //     (integrate_windows.go). The MSI installer ships equivalent HKLM keys, so
 //     this is only needed for portable installs.
 //
@@ -24,7 +24,8 @@ import (
 func usageIntegrate(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down integrate [--remove]
 
-Add a right-click "Downgrade" action for .prproj files (%s).
+Add a right-click "Downgrade" action for .prproj project files and .prodset
+Production settings files (%s).
 
 Options:
       --remove    remove the right-click action instead

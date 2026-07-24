@@ -19,8 +19,10 @@ import (
 func TestContextMenuRegAdds(t *testing.T) {
 	exe := `C:\Tools\prem-down.exe`
 	adds := contextMenuRegAdds(exe)
-	if len(adds) != 5 {
-		t.Fatalf("expected 5 reg add commands, got %d", len(adds))
+	// Three adds per file type (title, icon, DropTarget), plus the two that
+	// register the shared COM handler once.
+	if want := 3*len(contextMenuKeys) + 2; len(adds) != want {
+		t.Fatalf("expected %d reg add commands, got %d", want, len(adds))
 	}
 	for _, args := range adds {
 		if args[0] != "add" {
@@ -31,12 +33,12 @@ func TestContextMenuRegAdds(t *testing.T) {
 		}
 	}
 
-	var sawDropTarget, sawLocalServer bool
+	dropTargets, sawLocalServer := 0, false
 	for _, args := range adds {
 		key, value := args[1], args[len(args)-2]
 		switch {
 		case strings.HasSuffix(key, `\DropTarget`):
-			sawDropTarget = true
+			dropTargets++
 			if value != dropHandlerCLSID {
 				t.Errorf("DropTarget CLSID = %q, want %q", value, dropHandlerCLSID)
 			}
@@ -47,8 +49,10 @@ func TestContextMenuRegAdds(t *testing.T) {
 			}
 		}
 	}
-	if !sawDropTarget {
-		t.Error("no DropTarget\\CLSID reg add")
+	// Every file type needs its own verb, and all of them must resolve to the
+	// single handler — otherwise one of the two menu entries does nothing.
+	if dropTargets != len(contextMenuKeys) {
+		t.Errorf("got %d DropTarget\\CLSID reg adds, want %d", dropTargets, len(contextMenuKeys))
 	}
 	if !sawLocalServer {
 		t.Error("no CLSID\\LocalServer32 reg add")
@@ -58,6 +62,30 @@ func TestContextMenuRegAdds(t *testing.T) {
 	// the verb points at, or Explorer's activation would find nothing.
 	if !strings.Contains(clsidKey, dropHandlerCLSID) {
 		t.Errorf("clsidKey %q does not reference CLSID %q", clsidKey, dropHandlerCLSID)
+	}
+}
+
+// Productions are reached through the .prodset entry. If that key were ever
+// dropped, right-clicking a Production's settings file would silently offer
+// nothing, so pin both file types explicitly.
+func TestContextMenuCoversProjectsAndProductions(t *testing.T) {
+	for _, ext := range []string{prprojExt, prodsetExt} {
+		found := false
+		for _, key := range contextMenuKeys {
+			if strings.Contains(key, ext+`\shell\`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no context-menu key for %s in %v", ext, contextMenuKeys)
+		}
+	}
+	// Folders are deliberately excluded: a Directory verb would appear on every
+	// folder on the machine.
+	for _, key := range contextMenuKeys {
+		if strings.Contains(key, `\Directory\`) {
+			t.Errorf("context menu registered on all folders: %q", key)
+		}
 	}
 }
 

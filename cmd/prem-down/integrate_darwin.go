@@ -16,6 +16,13 @@
 // The shell step filters by extension instead and explains itself via a
 // dialog when handed the wrong file.
 //
+// It accepts .prodset — a Production's settings file — alongside .prproj, which
+// is how Productions are reached. Productions are folders, but the action is
+// deliberately NOT offered on folders: NSSendFileTypes filters by type only, so
+// public.folder would put "Downgrade" on every folder on the machine with no way
+// to tell a Production apart. A .prodset only exists inside a Production, so
+// keying on it is precise; prem-down maps it back to its folder.
+//
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package main
@@ -47,8 +54,7 @@ const (
 	fileManagerName = "Finder"
 	integrationKind = "a Finder Quick Action"
 
-	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file and pick
-Quick Actions > ` + quickActionMenuTitle + `.
+	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
 If it doesn't appear, enable it with Quick Actions > Customise…`
 	integrationRemovedMessage = "Removed the Finder Quick Action."
 
@@ -69,9 +75,9 @@ const quickActionScript = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 dialog() { /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) buttons {"OK"} default button 1 with title "prem-down" with icon caution' -e 'end run' "$1" >/dev/null; }
 for f in "$@"; do
   case "$f" in
-  *.prproj) ;;
+  *.prproj|*.prodset) ;;
   *)
-    dialog "Not a Premiere project (.prproj): $f"
+    dialog "Not a Premiere project (.prproj) or Production settings file (.prodset): $f"
     continue
     ;;
   esac

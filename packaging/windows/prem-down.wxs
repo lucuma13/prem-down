@@ -8,9 +8,10 @@
       -o prem-down_windows_amd64.msi
 
   It installs the exe to Program Files, puts it on the system PATH, and adds
-  the Explorer right-click entry for .prproj files - the same entry
-  "prem-down integrate" writes, but under HKLM so it applies to all users and
-  is removed by uninstall. Per-machine scope: winget elevates as needed.
+  the Explorer right-click entries for .prproj and .prodset files - the same
+  entries "prem-down integrate" writes, but under HKLM so they apply to all
+  users and are removed by uninstall. Per-machine scope: winget elevates as
+  needed.
 
   The UpgradeCode must NEVER change: it is how newer MSIs find and replace
   older installs. The ProductCode is regenerated on every build (MajorUpgrade
@@ -49,12 +50,26 @@
              HKCU for portable installs); keep the two in sync. The verb is a
              Drop Target: its CLSID resolves to prem-down's own COM LocalServer
              so a multi-file selection reaches one process. The CLSID value here
-             must match dropHandlerCLSID in integrate_windows.go. -->
+             must match dropHandlerCLSID in integrate_windows.go.
+
+             Two file types, one handler: .prproj for a lone project, and
+             .prodset for a Production. A Production is a folder, but the entry
+             is keyed on its settings file. -->
         <Component Id="ContextMenu">
           <RegistryKey Root="HKLM"
                        Key="SOFTWARE\Classes\SystemFileAssociations\.prproj\shell\prem-down">
             <RegistryValue Type="string"
                            Value="Downgrade" KeyPath="yes" />
+            <RegistryValue Type="string" Name="Icon"
+                           Value="[INSTALLFOLDER]prem-down.exe" />
+            <RegistryKey Key="DropTarget">
+              <RegistryValue Type="string" Name="CLSID"
+                             Value="{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}" />
+            </RegistryKey>
+          </RegistryKey>
+          <RegistryKey Root="HKLM"
+                       Key="SOFTWARE\Classes\SystemFileAssociations\.prodset\shell\prem-down">
+            <RegistryValue Type="string" Value="Downgrade" />
             <RegistryValue Type="string" Name="Icon"
                            Value="[INSTALLFOLDER]prem-down.exe" />
             <RegistryKey Key="DropTarget">

@@ -13,13 +13,14 @@ License: MIT
 LicenseUrl: https://github.com/lucuma13/prem-down/blob/main/LICENSE
 ShortDescription: Downgrade Premiere Pro project files so older versions can open them
 Description: |-
-  prem-down downgrades an Adobe Premiere Pro project file so an older version
-  of Premiere can open it.
+  prem-down downgrades an Adobe Premiere Pro project file, or a whole Premiere
+  Pro Production, so an older version of Premiere can open it.
 Moniker: prem-down
 Tags:
   - adobe
   - premiere
   - prproj
+  - productions
   - video
   - video-editing
 ManifestType: defaultLocale
