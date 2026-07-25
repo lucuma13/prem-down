@@ -49,6 +49,10 @@ func TestIntegrateMainInstallAndRemove(t *testing.T) {
 	enableServiceMenu = func() error { return nil }
 	t.Cleanup(func() { enableServiceMenu = origEnable })
 
+	origDisable := disableServiceMenu
+	disableServiceMenu = func() error { return nil }
+	t.Cleanup(func() { disableServiceMenu = origDisable })
+
 	c := newTestCLI("")
 	bundle := filepath.Join(home, "Library", "Services", quickActionMenuTitle+".workflow")
 
@@ -82,6 +86,10 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	origEnable := enableServiceMenu
 	enableServiceMenu = func() error { return nil }
 	t.Cleanup(func() { enableServiceMenu = origEnable })
+
+	origDisable := disableServiceMenu
+	disableServiceMenu = func() error { return nil }
+	t.Cleanup(func() { disableServiceMenu = origDisable })
 
 	if err := installIntegration(); err != nil {
 		t.Fatalf("installIntegration: %v", err)
@@ -138,5 +146,32 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	// Removing what is already gone stays quiet (uninstall hook re-runs).
 	if err := removeIntegration(); err != nil {
 		t.Fatalf("second removeIntegration: %v", err)
+	}
+}
+
+// removeIntegration must reverse the Services-database entry, not just delete
+// the bundle: it has to invoke the disable seam so no stale NSServicesStatus
+// record lingers after uninstall.
+func TestRemoveIntegrationDisablesService(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origEnable := enableServiceMenu
+	enableServiceMenu = func() error { return nil }
+	t.Cleanup(func() { enableServiceMenu = origEnable })
+
+	called := false
+	origDisable := disableServiceMenu
+	disableServiceMenu = func() error { called = true; return nil }
+	t.Cleanup(func() { disableServiceMenu = origDisable })
+
+	if err := installIntegration(); err != nil {
+		t.Fatalf("installIntegration: %v", err)
+	}
+	if err := removeIntegration(); err != nil {
+		t.Fatalf("removeIntegration: %v", err)
+	}
+	if !called {
+		t.Error("removeIntegration did not invoke disableServiceMenu")
 	}
 }

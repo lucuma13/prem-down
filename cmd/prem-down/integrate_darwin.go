@@ -2,26 +2,32 @@
 //
 // A Quick Action is an Automator .workflow bundle in ~/Library/Services — two
 // plists plus a template-image TIFF, no compiled code — so it can be written
-// directly and needs no code signing. Its shell step resolves prem-down
-// through the Homebrew bin dirs at run time (not an absolute Cellar/Caskroom
-// path), so it survives upgrades of the cask untouched.
+// directly and needs no code signing. Its shell step resolves prem-down through
+// the Homebrew bin dirs at run time (not an absolute Cellar/Caskroom path), so
+// it survives upgrades of the cask untouched.
 //
 // NSIconName is resolved against the workflow bundle's own Resources, so a
 // template TIFF named workflowCustomImageTemplate.tiff there is drawn as the
 // menu icon.
 //
-// The service accepts any file (public.data) rather than a .prproj UTI:
-// without Premiere installed the extension maps to a dynamic UTI, and with it
-// installed to whatever UTI Adobe declares, so no fixed UTI list is reliable.
-// The shell step filters by extension instead and explains itself via a
-// dialog when handed the wrong file.
+// That custom image only drives the Finder context-menu glyph. The System
+// Settings > Extensions ("Customise…") list shows its own icon for a .workflow
+// Quick Action and cannot be pointed at a custom one. A custom icon in that
+// list would require a signed Action Extension, which this signing-free
+// .workflow deliberately avoids.
+//
+// The service accepts any file (public.data) rather than a .prproj UTI: without
+// Premiere installed the extension maps to a dynamic UTI, and with it installed
+// to whatever UTI Adobe declares, so no fixed UTI list is reliable. The shell
+// step filters by extension instead and explains itself via a dialog when
+// handed the wrong file.
 //
 // It accepts .prodset — a Production's settings file — alongside .prproj, which
 // is how Productions are reached. Productions are folders, but the action is
 // deliberately NOT offered on folders: NSSendFileTypes filters by type only, so
-// public.folder would put "Downgrade" on every folder on the machine with no way
-// to tell a Production apart. A .prodset only exists inside a Production, so
-// keying on it is precise; prem-down maps it back to its folder.
+// public.folder would put "Downgrade" on every folder on the machine with no
+// way to tell a Production apart. A .prodset only exists inside a Production,
+// so keying on it is precise; prem-down maps it back to its folder.
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
@@ -398,6 +404,11 @@ func installIntegration() error {
 // own machine during `go test`.
 var enableServiceMenu = enableQuickAction
 
+// disableServiceMenu is the seam removeIntegration uses to switch the Quick
+// Action off — the mirror of enableServiceMenu, and a variable for the same
+// test reason: the real implementation writes the per-user `pbs` domain.
+var disableServiceMenu = disableQuickAction
+
 // serviceStatusKey identifies the Quick Action in the Services database (the
 // `pbs` NSServicesStatus dictionary). A workflow service carries no bundle
 // identifier, so pbs keys it under "(null)"; the middle segment is the menu
@@ -446,6 +457,31 @@ func enableQuickAction() error {
 	return nil
 }
 
+// disableQuickAction reverses enableQuickAction: it deletes the Quick Action's
+// entry from the per-user `pbs` NSServicesStatus dictionary, so removing the
+// workflow leaves no stale Services-database record behind. Same export /
+// plutil / import dance as the enable path (defaults cannot address the
+// parenthesized key; import keeps cfprefsd's cache coherent).
+func disableQuickAction() error {
+	f, err := os.CreateTemp("", "prem-down-pbs-*.plist")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(tmp) }()
+
+	if err := exec.Command("defaults", "export", "pbs", tmp).Run(); err != nil { //nolint:gosec // G204: constant args; tmp is our own temp path
+		return err
+	}
+	// Nothing to undo if our entry (or the NSServicesStatus container) is absent.
+	keyPath := "NSServicesStatus." + serviceStatusKey()
+	if exec.Command("plutil", "-remove", keyPath, tmp).Run() != nil { //nolint:gosec // G204: keyPath derives from a constant title; own temp path
+		return nil
+	}
+	return exec.Command("defaults", "import", "pbs", tmp).Run() //nolint:gosec // G204: constant args; own temp path
+}
+
 func removeIntegration() error {
 	bundle, err := quickActionPath()
 	if err != nil {
@@ -454,6 +490,9 @@ func removeIntegration() error {
 	if err := os.RemoveAll(bundle); err != nil {
 		return err
 	}
+	// Best-effort: reverse the NSServicesStatus entry installIntegration wrote,
+	// so nothing stale lingers in the Services database after uninstall.
+	_ = disableServiceMenu()
 	refreshServicesMenu()
 	return nil
 }
