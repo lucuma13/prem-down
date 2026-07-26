@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: upgrade pre-commit test install uninstall reinstall clean help
+.PHONY: setup-dev upgrade pre-commit test install uninstall reinstall clean help
 
 # Identity derived from the cmd/<name> layout.
 BINARY  := $(notdir $(CURDIR))
@@ -7,6 +7,17 @@ PKG     := ./cmd/$(BINARY)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOBIN   := $(shell go env GOPATH)/bin
+
+setup-dev: ## Install dev pre-requisites (Go, pre-commit)
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "winget install -e --silent --accept-package-agreements --accept-source-agreements GoLang.Go astral-sh.uv; $$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); uv tool install pre-commit; uv tool update-shell; uv tool run pre-commit install"
+else ifeq ($(shell uname -s),Darwin)
+	brew install go pre-commit
+	pre-commit install
+else
+	sudo apt-get install -y golang-go pre-commit
+	pre-commit install
+endif
 
 upgrade: ## Upgrade dependencies
 	go get -u ./...
