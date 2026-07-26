@@ -10,11 +10,17 @@ trim_trailing_whitespace = true
 [*.md]
 trim_trailing_whitespace = false
 
-[*.mhl]
-insert_final_newline = unset
+[Makefile]
+indent_style = tab
+indent_size = unset
 
-[*.{py,ps1,swift}]
-indent_size = 4
-
-[*.{toml,yaml,yml,sh,bash,bats}]
+[*.{yaml,yml}]
 indent_size = 2
+
+[*.go]
+indent_style = tab
+indent_size = unset
+
+[{go.mod,go.sum}]
+indent_style = tab
+indent_size = unset
