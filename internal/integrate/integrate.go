@@ -1,6 +1,5 @@
-// The "integrate" subcommand wires prem-down into the OS file manager so
-// non-technical editors never need a terminal: right-click a .prproj (or a
-// Production's .prodset) and pick "Downgrade".
+// Package integrate wires prem-down into the OS file manager: right-click a
+// .prproj (or a Production's .prodset) and pick "Downgrade".
 //
 //   - macOS: installs a Finder Quick Action into ~/Library/Services
 //     (integrate_darwin.go). The Homebrew cask runs this automatically after
@@ -13,8 +12,7 @@
 // "integrate --remove" undoes the wiring.
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
-
-package main
+package integrate
 
 import (
 	"fmt"
@@ -33,30 +31,41 @@ Options:
 `, integrationKind)
 }
 
-func (c *cli) integrate(args []string) int {
+// Run executes the "integrate" subcommand and returns the process exit code for
+// the caller to return, writing through the injected streams rather than
+// os.Stdout/os.Stderr.
+//
+// It never pauses for the --gui prompt the way the downgrade path does: run
+// dispatches "integrate" before parsing any flags, so --gui cannot be set when
+// this is reached.
+func Run(out, errw io.Writer, args []string) int {
+	fatal := func(format string, a ...any) int {
+		_, _ = fmt.Fprintf(errw, format+"\n", a...)
+		return 1
+	}
 	remove := false
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
-			usageIntegrate(c.out)
+			usageIntegrate(out)
 			return 0
 		case "--remove":
 			remove = true
 		default:
-			usageIntegrate(c.err)
-			return c.fatal("error: unknown option %s", a)
+			usageIntegrate(errw)
+			return fatal("error: unknown option %s", a)
 		}
 	}
 	if remove {
 		if err := removeIntegration(); err != nil {
-			return c.fatal("error: %v", err)
+			return fatal("error: %v", err)
 		}
-		_, _ = fmt.Fprintln(c.out, integrationRemovedMessage)
+		_, _ = fmt.Fprintln(out, integrationRemovedMessage)
 		return 0
 	}
 	if err := installIntegration(); err != nil {
-		return c.fatal("error: %v", err)
+		return fatal("error: %v", err)
 	}
-	_, _ = fmt.Fprintln(c.out, integrationInstalledMessage)
+	_, _ = fmt.Fprintln(out, integrationInstalledMessage)
 	return 0
 }

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package main
+package premdown
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,9 +51,9 @@ const prinSidecar = "\x1f\x8b\x08\x00binary sidecar\xff"
 func newProduction(t *testing.T, name string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
-	writeFile(t, filepath.Join(dir, name+prodsetExt), prodset2026)
-	writeFile(t, filepath.Join(dir, "Untitled"+prprojExt), prodProject)
-	writeFile(t, filepath.Join(dir, "subfolder", "nested"+prprojExt), prodProject)
+	writeFile(t, filepath.Join(dir, name+ProdsetExt), prodset2026)
+	writeFile(t, filepath.Join(dir, "Untitled"+PrprojExt), prodProject)
+	writeFile(t, filepath.Join(dir, "subfolder", "nested"+PrprojExt), prodProject)
 	writeFile(t, filepath.Join(dir, "subfolder", "nested.prin"), prinSidecar)
 	return dir
 }
@@ -71,9 +72,9 @@ func readFile(t *testing.T, path string) string {
 // and Adobe's exact formatting survive untouched.
 func TestDowngradeProdsetChangesOnlyTheVersionKeys(t *testing.T) {
 	dir := t.TempDir()
-	src := writeFile(t, filepath.Join(dir, "p"+prodsetExt), prodset2026)
-	dst := filepath.Join(dir, "out"+prodsetExt)
-	if err := dcli().downgradeProdset(src, dst, 43, false); err != nil {
+	src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt), prodset2026)
+	dst := filepath.Join(dir, "out"+ProdsetExt)
+	if err := silent().downgradeProdset(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, dst)
@@ -97,8 +98,8 @@ func TestDowngradeProdsetRealFixtureChangesOnlyVersionKeys(t *testing.T) {
 	}
 	original := readFile(t, fixture)
 
-	dst := filepath.Join(t.TempDir(), "out"+prodsetExt)
-	if err := dcli().downgradeProdset(fixture, dst, 43, false); err != nil {
+	dst := filepath.Join(t.TempDir(), "out"+ProdsetExt)
+	if err := silent().downgradeProdset(fixture, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, dst)
@@ -120,10 +121,10 @@ func TestDowngradeProdsetRealFixtureChangesOnlyVersionKeys(t *testing.T) {
 // would lock out releases that could previously open it.
 func TestDowngradeProdsetNeverRaisesCompatibilityFloor(t *testing.T) {
 	dir := t.TempDir()
-	src := writeFile(t, filepath.Join(dir, "p"+prodsetExt),
+	src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt),
 		`{"mMinCompatibleProjectVersion":40,"mProjectVersion":45}`)
-	dst := filepath.Join(dir, "out"+prodsetExt)
-	if err := dcli().downgradeProdset(src, dst, 43, false); err != nil {
+	dst := filepath.Join(dir, "out"+ProdsetExt)
+	if err := silent().downgradeProdset(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readFile(t, dst), `{"mMinCompatibleProjectVersion":40,"mProjectVersion":43}`; got != want {
@@ -150,10 +151,10 @@ func TestProdsetKeyPatternsDoNotOverlap(t *testing.T) {
 // reads. Refuse rather than half-stamp the file.
 func TestDowngradeProdsetRefusesDuplicateVersionKey(t *testing.T) {
 	dir := t.TempDir()
-	src := writeFile(t, filepath.Join(dir, "p"+prodsetExt),
+	src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt),
 		`{"mProjectVersion":45,"mProjectVersion":45}`)
-	dst := filepath.Join(dir, "out"+prodsetExt)
-	err := dcli().downgradeProdset(src, dst, 43, false)
+	dst := filepath.Join(dir, "out"+ProdsetExt)
+	err := silent().downgradeProdset(src, dst, 43, false)
 	if err == nil {
 		t.Fatal("expected a refusal for a duplicated version key")
 	}
@@ -165,18 +166,18 @@ func TestDowngradeProdsetRefusesDuplicateVersionKey(t *testing.T) {
 	}
 }
 
-// Verbose mode narrates both stamps, since a user checking why 2025 still
-// refuses a Production needs to see that the compatibility floor moved too.
+// Verbose mode narrates both stamps.
 func TestDowngradeProdsetVerboseNarratesBothStamps(t *testing.T) {
 	dir := t.TempDir()
-	src := writeFile(t, filepath.Join(dir, "p"+prodsetExt), prodset2026)
-	c := newTestCLI("")
-	if err := c.downgradeProdset(src, filepath.Join(dir, "out"+prodsetExt), 0, true); err != nil {
+	src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt), prodset2026)
+	var out bytes.Buffer
+	d := &Downgrader{Out: &out}
+	if err := d.downgradeProdset(src, filepath.Join(dir, "out"+ProdsetExt), 0, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"auto target", "mProjectVersion -> 43", "mMinCompatibleProjectVersion -> 43"} {
-		if !strings.Contains(c.out.String(), want) {
-			t.Errorf("verbose output missing %q:\n%s", want, c.out)
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("verbose output missing %q:\n%s", want, out.String())
 		}
 	}
 }
@@ -199,17 +200,16 @@ func TestParseProdsetRejectsNonProdset(t *testing.T) {
 func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 	src := newProduction(t, "MyProduction")
 	dst := src + "_downgraded"
-	c := newTestCLI("")
-	if err := c.downgradeProduction(src, dst, 43, false); err != nil {
+	if err := silent().DowngradeProduction(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
 
 	// The settings file is renamed to match the output folder (see the dedicated
 	// rename test); read it back under that name.
-	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+prodsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
+	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+ProdsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
 		t.Errorf("settings not downgraded: %s", got)
 	}
-	for _, rel := range []string{"Untitled" + prprojExt, filepath.Join("subfolder", "nested"+prprojExt)} {
+	for _, rel := range []string{"Untitled" + PrprojExt, filepath.Join("subfolder", "nested"+PrprojExt)} {
 		xml := string(gunzipFile(t, filepath.Join(dst, rel)))
 		if v := mustGetProjectVersion(t, xml); v != 43 {
 			t.Errorf("%s: version = %d, want 43", rel, v)
@@ -220,10 +220,10 @@ func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 		t.Errorf("sidecar not copied verbatim: %q", got)
 	}
 	// The source is an input, never an output.
-	if got := readFile(t, filepath.Join(src, "MyProduction"+prodsetExt)); got != prodset2026 {
+	if got := readFile(t, filepath.Join(src, "MyProduction"+ProdsetExt)); got != prodset2026 {
 		t.Error("the original Production was modified")
 	}
-	if _, err := os.Stat(filepath.Join(src, "MyProduction_downgraded"+prodsetExt)); err == nil {
+	if _, err := os.Stat(filepath.Join(src, "MyProduction_downgraded"+ProdsetExt)); err == nil {
 		t.Error("a stray downgraded settings file was left in the original folder")
 	}
 }
@@ -235,14 +235,14 @@ func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 	src := newProduction(t, "MyProduction")
 	dst := src + "_downgraded"
-	if err := dcli().downgradeProduction(src, dst, 43, false); err != nil {
+	if err := silent().DowngradeProduction(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dst, filepath.Base(dst)+prodsetExt) // MyProduction_downgraded.prodset
+	want := filepath.Join(dst, filepath.Base(dst)+ProdsetExt) // MyProduction_downgraded.prodset
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("settings file should be renamed to match the folder: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dst, "MyProduction"+prodsetExt)); err == nil {
+	if _, err := os.Stat(filepath.Join(dst, "MyProduction"+ProdsetExt)); err == nil {
 		t.Error("the original settings-file name should not remain in the output")
 	}
 	// The unique-suffix case: a taken output name means the folder becomes
@@ -250,11 +250,11 @@ func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 	if err := os.Mkdir(src+"_downgraded", 0o755); err == nil { //nolint:gosec // test setup
 		_ = err
 	}
-	dst2 := uniqueDir(src + "_downgraded")
-	if err := dcli().downgradeProduction(src, dst2, 43, false); err != nil {
+	dst2 := UniqueDir(src + "_downgraded")
+	if err := silent().DowngradeProduction(src, dst2, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dst2, filepath.Base(dst2)+prodsetExt)); err != nil {
+	if _, err := os.Stat(filepath.Join(dst2, filepath.Base(dst2)+ProdsetExt)); err != nil {
 		t.Errorf("settings file should track the suffixed folder name %s: %v", filepath.Base(dst2), err)
 	}
 }
@@ -265,13 +265,13 @@ func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 // or the mirrored Production would be missing a project.
 func TestDowngradeProductionCopiesAlreadyOldProjects(t *testing.T) {
 	src := newProduction(t, "Mixed")
-	writeFile(t, filepath.Join(src, "old"+prprojExt),
+	writeFile(t, filepath.Join(src, "old"+PrprojExt),
 		strings.Replace(prodProject, `Version="45"`, `Version="41"`, 1))
 	dst := src + "_downgraded"
-	if err := dcli().downgradeProduction(src, dst, 43, false); err != nil {
+	if err := silent().DowngradeProduction(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	xml := readFile(t, filepath.Join(dst, "old"+prprojExt))
+	xml := readFile(t, filepath.Join(dst, "old"+PrprojExt))
 	if v := mustGetProjectVersion(t, xml); v != 41 {
 		t.Errorf("an already-older project should be copied unchanged, got version %d", v)
 	}
@@ -283,12 +283,12 @@ func TestDowngradeProductionCopiesAlreadyOldProjects(t *testing.T) {
 // checkProductionTarget, distinct from an explicit pre-Productions --to.
 func TestProductionAtFloorRefusesAutoTarget(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "AtFloor")
-	writeFile(t, filepath.Join(dir, "AtFloor"+prodsetExt),
+	writeFile(t, filepath.Join(dir, "AtFloor"+ProdsetExt),
 		`{"mMinCompatibleProjectVersion":38,"mProjectVersion":38}`)
-	writeFile(t, filepath.Join(dir, "a"+prprojExt),
+	writeFile(t, filepath.Join(dir, "a"+PrprojExt),
 		strings.Replace(prodProject, `Version="45"`, `Version="38"`, 1))
 	dst := dir + "_downgraded"
-	err := dcli().downgradeProduction(dir, dst, 0, false) // 0 => auto
+	err := silent().DowngradeProduction(dir, dst, 0, false) // 0 => auto
 	if err == nil {
 		t.Fatal("a Production already at the oldest Production release cannot be downgraded")
 	}
@@ -307,7 +307,7 @@ func TestProductionAtFloorRefusesAutoTarget(t *testing.T) {
 func TestProductionRefusesTargetsPredatingProductions(t *testing.T) {
 	src := newProduction(t, "Old")
 	dst := src + "_downgraded"
-	err := dcli().downgradeProduction(src, dst, 35, false)
+	err := silent().DowngradeProduction(src, dst, 35, false)
 	if err == nil {
 		t.Fatal("expected a refusal for a pre-Productions target")
 	}
@@ -318,7 +318,7 @@ func TestProductionRefusesTargetsPredatingProductions(t *testing.T) {
 		t.Error("nothing should have been written for a refused target")
 	}
 	// The floor itself is allowed.
-	if err := dcli().downgradeProduction(src, dst, firstProductionProjectVersion, false); err != nil {
+	if err := silent().DowngradeProduction(src, dst, firstProductionProjectVersion, false); err != nil {
 		t.Errorf("version %d is the first release with Productions and must be allowed: %v",
 			firstProductionProjectVersion, err)
 	}
@@ -328,8 +328,8 @@ func TestProductionRefusesTargetsPredatingProductions(t *testing.T) {
 // pre-2020 guard must not leak into the plain-file path.
 func TestPlainProjectStillAllowsPreProductionTargets(t *testing.T) {
 	dir := t.TempDir()
-	src := writeFile(t, filepath.Join(dir, "a"+prprojExt), prodProject)
-	if err := dcli().downgrade(src, filepath.Join(dir, "out"+prprojExt), 35, false); err != nil {
+	src := writeFile(t, filepath.Join(dir, "a"+PrprojExt), prodProject)
+	if err := silent().Downgrade(src, filepath.Join(dir, "out"+PrprojExt), 35, false); err != nil {
 		t.Errorf("a lone project should still downgrade to a pre-Productions release: %v", err)
 	}
 }
@@ -339,127 +339,13 @@ func TestFindProdsetRequiresExactlyOne(t *testing.T) {
 	if _, err := findProdset(dir); err == nil {
 		t.Error("a folder with no settings file is not a Production")
 	}
-	writeFile(t, filepath.Join(dir, "a"+prodsetExt), prodset2026)
-	if got, err := findProdset(dir); err != nil || filepath.Base(got) != "a"+prodsetExt {
+	writeFile(t, filepath.Join(dir, "a"+ProdsetExt), prodset2026)
+	if got, err := findProdset(dir); err != nil || filepath.Base(got) != "a"+ProdsetExt {
 		t.Errorf("findProdset = %q, %v", got, err)
 	}
-	writeFile(t, filepath.Join(dir, "b"+prodsetExt), prodset2026)
+	writeFile(t, filepath.Join(dir, "b"+ProdsetExt), prodset2026)
 	if _, err := findProdset(dir); err == nil {
 		t.Error("two settings files are ambiguous and must be refused")
-	}
-}
-
-// The context menu is keyed on the .prodset file, so the natural gesture is to
-// select it together with the projects. Those projects are already inside the
-// Production being mirrored; downgrading them again would scatter stray
-// _downgraded.prproj files through the user's original folder.
-func TestPlanSkipsProjectsCoveredByAProduction(t *testing.T) {
-	src := newProduction(t, "Sel")
-	c := newTestCLI("")
-	jobs, failed := c.plan([]string{
-		filepath.Join(src, "Sel"+prodsetExt),
-		filepath.Join(src, "Untitled"+prprojExt),
-		filepath.Join(src, "subfolder", "nested"+prprojExt),
-	})
-	if failed {
-		t.Error("no input was missing; nothing should have failed")
-	}
-	if len(jobs) != 1 || !jobs[0].production || jobs[0].path != src {
-		t.Fatalf("expected one Production job for %s, got %+v", src, jobs)
-	}
-	if !strings.Contains(c.out.String(), "already part of the Production") {
-		t.Errorf("the skip should be explained to the user:\n%s", c.out)
-	}
-}
-
-// Selecting two Productions at once downgrades both.
-func TestPlanAcceptsMultipleProductions(t *testing.T) {
-	a := newProduction(t, "A")
-	b := newProduction(t, "B")
-	jobs, failed := newTestCLI("").plan([]string{
-		filepath.Join(a, "A"+prodsetExt),
-		filepath.Join(b, "B"+prodsetExt),
-	})
-	if failed {
-		t.Error("nothing was missing; the plan should not have failed")
-	}
-	if len(jobs) != 2 {
-		t.Fatalf("expected one job per Production, got %d: %+v", len(jobs), jobs)
-	}
-	for _, j := range jobs {
-		if !j.production {
-			t.Errorf("job %q should be a Production", j.path)
-		}
-	}
-}
-
-// Naming the folder and its settings file together is one Production, not two —
-// otherwise the second pass would write a redundant "_downgraded-1" copy.
-func TestPlanDeduplicatesFolderAndProdset(t *testing.T) {
-	src := newProduction(t, "Dup")
-	jobs, _ := newTestCLI("").plan([]string{src, filepath.Join(src, "Dup"+prodsetExt)})
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 job, got %d: %+v", len(jobs), jobs)
-	}
-}
-
-// A project outside every named Production is its own job, even when a
-// Production is also selected.
-func TestPlanKeepsProjectsOutsideTheProduction(t *testing.T) {
-	src := newProduction(t, "Inside")
-	lone := writeFile(t, filepath.Join(t.TempDir(), "lone"+prprojExt), prodProject)
-	jobs, _ := newTestCLI("").plan([]string{src, lone})
-	if len(jobs) != 2 {
-		t.Fatalf("expected 2 jobs, got %d: %+v", len(jobs), jobs)
-	}
-}
-
-// End to end through run: the .prodset argument the context menu passes, with
-// no --to, must land a downgraded Production in the sibling folder.
-func TestRunDowngradesProductionFromProdsetArgument(t *testing.T) {
-	src := newProduction(t, "E2E")
-	c := newTestCLI("")
-	if code := c.run([]string{filepath.Join(src, "E2E"+prodsetExt)}); code != 0 {
-		t.Fatalf("run should succeed, got code=%d\n%s", code, c.err)
-	}
-	dst := src + "_downgraded"
-	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+prodsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
-		t.Errorf("auto target should be 2025 (43): %s", got)
-	}
-	if !strings.Contains(c.out.String(), "wrote "+dst) {
-		t.Errorf("the output folder should be reported:\n%s", c.out)
-	}
-}
-
-// A folder that holds no settings file is not a Production; run reports it and
-// exits non-zero rather than inventing one.
-func TestRunRejectsNonProductionFolder(t *testing.T) {
-	dir := t.TempDir()
-	c := newTestCLI("")
-	if code := c.run([]string{dir}); code != 1 {
-		t.Fatalf("expected code 1, got %d", code)
-	}
-	if !strings.Contains(c.err.String(), "not a Premiere Production") {
-		t.Errorf("unhelpful diagnostic:\n%s", c.err)
-	}
-}
-
-// The output folder must be one we create. If the name is taken, run picks a
-// free one rather than merging into or overwriting whatever is there.
-func TestRunPicksAFreeOutputFolder(t *testing.T) {
-	src := newProduction(t, "Twice")
-	prodset := filepath.Join(src, "Twice"+prodsetExt)
-	c := newTestCLI("")
-	if code := c.run([]string{prodset}); code != 0 {
-		t.Fatalf("first run failed: %s", c.err)
-	}
-	if code := c.run([]string{prodset}); code != 0 {
-		t.Fatalf("second run failed: %s", c.err)
-	}
-	for _, dir := range []string{src + "_downgraded", src + "_downgraded-1"} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Errorf("expected %s to exist: %v", dir, err)
-		}
 	}
 }
 
@@ -468,10 +354,10 @@ func TestRunPicksAFreeOutputFolder(t *testing.T) {
 // Production behind.
 func TestDowngradeProductionRefusesCorruptProdset(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Broken")
-	writeFile(t, filepath.Join(dir, "Broken"+prodsetExt), "{not json")
-	writeFile(t, filepath.Join(dir, "a"+prprojExt), prodProject)
+	writeFile(t, filepath.Join(dir, "Broken"+ProdsetExt), "{not json")
+	writeFile(t, filepath.Join(dir, "a"+PrprojExt), prodProject)
 	dst := dir + "_downgraded"
-	if err := dcli().downgradeProduction(dir, dst, 43, false); err == nil {
+	if err := silent().DowngradeProduction(dir, dst, 43, false); err == nil {
 		t.Fatal("expected an error for a corrupt settings file")
 	}
 	if _, err := os.Stat(dst); err == nil {
@@ -479,15 +365,13 @@ func TestDowngradeProductionRefusesCorruptProdset(t *testing.T) {
 	}
 }
 
-// One bad project must not cost the user the rest of the Production, but the
-// result is an incomplete Production and must be reported as a failure rather
-// than presented as a finished copy.
+// One bad project must not cost the user the rest of the Production, but must
+// be reported as a failure.
 func TestDowngradeProductionReportsPartialFailure(t *testing.T) {
 	src := newProduction(t, "Partial")
-	writeFile(t, filepath.Join(src, "corrupt"+prprojExt), "not a premiere project at all")
+	writeFile(t, filepath.Join(src, "corrupt"+PrprojExt), "not a premiere project at all")
 	dst := src + "_downgraded"
-	c := newTestCLI("")
-	err := c.downgradeProduction(src, dst, 43, false)
+	err := silent().DowngradeProduction(src, dst, 43, false)
 	if err == nil {
 		t.Fatal("a Production with an unconvertible project should report failure")
 	}
@@ -495,7 +379,7 @@ func TestDowngradeProductionReportsPartialFailure(t *testing.T) {
 		t.Errorf("the error should say the output is incomplete: %v", err)
 	}
 	// The good files still made it, so the user can salvage the run.
-	if _, statErr := os.Stat(filepath.Join(dst, "Untitled"+prprojExt)); statErr != nil {
+	if _, statErr := os.Stat(filepath.Join(dst, "Untitled"+PrprojExt)); statErr != nil {
 		t.Errorf("the other projects should still have been written: %v", statErr)
 	}
 }
@@ -509,7 +393,7 @@ func TestDowngradeProductionPreservesSymlinks(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	dst := src + "_downgraded"
-	if err := dcli().downgradeProduction(src, dst, 43, false); err != nil {
+	if err := silent().DowngradeProduction(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	target, err := os.Readlink(filepath.Join(dst, "link.prin"))
@@ -521,7 +405,7 @@ func TestDowngradeProductionPreservesSymlinks(t *testing.T) {
 	}
 }
 
-// uniqueDir must not split a directory name on ".", or a Production folder with
+// UniqueDir must not split a directory name on ".", or a Production folder with
 // a dot in its name would get the suffix wedged into the middle.
 func TestUniqueDirDoesNotSplitOnDots(t *testing.T) {
 	dir := t.TempDir()
@@ -529,7 +413,7 @@ func TestUniqueDirDoesNotSplitOnDots(t *testing.T) {
 	if err := os.Mkdir(taken, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := uniqueDir(taken), taken+"-1"; got != want {
-		t.Errorf("uniqueDir = %q, want %q", got, want)
+	if got, want := UniqueDir(taken), taken+"-1"; got != want {
+		t.Errorf("UniqueDir = %q, want %q", got, want)
 	}
 }

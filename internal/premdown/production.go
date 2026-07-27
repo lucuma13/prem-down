@@ -4,20 +4,18 @@
 // file plus any number of .prproj files. Membership is implicit — every .prproj
 // under the folder belongs to the Production.
 //
-// Because the Production *is* the folder, the output has to be a folder too. A
-// Production downgrade mirrors the whole folder to a sibling
+// A Production downgrade mirrors the whole folder to a sibling
 // "<name>_downgraded" and rewrites the project files as it copies. Everything
 // else in the folder is copied verbatim, so project links that are relative to
 // the Production folder keep resolving.
 //
 // Premiere identifies a Production by the .prodset whose basename matches the
 // containing folder, so the settings file is renamed to the new folder name as
-// it is written ("<name>_downgraded.prodset"); otherwise Premiere would not
-// recognise the copy as a Production.
+// it is written ("<name>_downgraded.prodset").
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package main
+package premdown
 
 import (
 	"encoding/json"
@@ -31,10 +29,16 @@ import (
 	"strings"
 )
 
+// PrprojExt is the extension of a Premiere project file and ProdsetExt is the
+// extension of a Production's settings file. Exported because the OS
+// file-manager integration registers its context-menu entry against exactly the
+// file types prem-down can convert.
 const (
-	prprojExt  = ".prproj"
-	prodsetExt = ".prodset"
+	PrprojExt  = ".prproj"
+	ProdsetExt = ".prodset"
+)
 
+const (
 	// Productions were introduced on 14 April 2020. Older releases have no
 	// concept of a Production at all, so stamping one down to them produces a
 	// folder no Premiere will ever open — refused rather than written.
@@ -43,9 +47,7 @@ const (
 
 // A .prodset is plain JSON. Two keys carry the version: mProjectVersion, the
 // release that wrote the Production, and mMinCompatibleProjectVersion, the
-// oldest release allowed to open it. Premiere 2026 writes 45 to both, and
-// leaving the minimum at 45 makes 2025 refuse the Production even with every
-// project inside downgraded, so both are stamped.
+// oldest release allowed to open it.
 //
 // The rewrite is textual, for the same reason the .prproj path uses regexes.
 // Re-encoding through encoding/json would reorder nothing (Go sorts map keys
@@ -113,7 +115,7 @@ func verifyProdset(js string, wantVersion int) error {
 
 // downgradeProdset rewrites one Production settings file. Mirrors downgrade's
 // contract: every failure is returned, never fatal, so a batch keeps going.
-func (c *cli) downgradeProdset(src, dst string, projectVersion int, verbose bool) error {
+func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbose bool) error {
 	raw, err := readMaybeGzip(src)
 	if err != nil {
 		return err
@@ -122,7 +124,7 @@ func (c *cli) downgradeProdset(src, dst string, projectVersion int, verbose bool
 	if err != nil {
 		return err
 	}
-	projectVersion, err = c.resolveTarget(*v.Project, projectVersion, verbose)
+	projectVersion, err = d.resolveTarget(*v.Project, projectVersion, verbose)
 	if err != nil {
 		return err
 	}
@@ -144,9 +146,9 @@ func (c *cli) downgradeProdset(src, dst string, projectVersion int, verbose bool
 		}
 	}
 	if verbose {
-		_, _ = fmt.Fprintf(c.out, "  set mProjectVersion -> %d\n", projectVersion)
+		_, _ = fmt.Fprintf(d.out(), "  set mProjectVersion -> %d\n", projectVersion)
 		if v.MinCompatible != nil && *v.MinCompatible > projectVersion {
-			_, _ = fmt.Fprintf(c.out, "  set mMinCompatibleProjectVersion -> %d\n", projectVersion)
+			_, _ = fmt.Fprintf(d.out(), "  set mMinCompatibleProjectVersion -> %d\n", projectVersion)
 		}
 	}
 	if err := verifyProdset(js, projectVersion); err != nil {
@@ -181,7 +183,7 @@ func findProdset(dir string) (string, error) {
 	}
 	var found []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), prodsetExt) {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ProdsetExt) {
 			found = append(found, filepath.Join(dir, e.Name()))
 		}
 	}
@@ -189,10 +191,10 @@ func findProdset(dir string) (string, error) {
 	case 1:
 		return found[0], nil
 	case 0:
-		return "", fmt.Errorf("not a Premiere Production: no %s file in %s", prodsetExt, dir)
+		return "", fmt.Errorf("not a Premiere Production: no %s file in %s", ProdsetExt, dir)
 	default:
 		return "", fmt.Errorf("not a Premiere Production: found %d %s files in %s, expected one",
-			len(found), prodsetExt, dir)
+			len(found), ProdsetExt, dir)
 	}
 }
 
@@ -227,7 +229,7 @@ func copyFile(src, dst string, perm os.FileMode) error {
 // be stamped with. It comes from the .prodset, not from each project: a
 // Production is only coherent if its settings file and all its projects name
 // the same release, so the projects must not each pick their own auto target.
-func (c *cli) productionTarget(prodset string, requested int, verbose bool) (int, error) {
+func (d *Downgrader) productionTarget(prodset string, requested int, verbose bool) (int, error) {
 	raw, err := readMaybeGzip(prodset)
 	if err != nil {
 		return 0, err
@@ -236,14 +238,14 @@ func (c *cli) productionTarget(prodset string, requested int, verbose bool) (int
 	if err != nil {
 		return 0, err
 	}
-	target, err := c.resolveTarget(*v.Project, requested, verbose)
+	target, err := d.resolveTarget(*v.Project, requested, verbose)
 	if err != nil {
 		return 0, err
 	}
 	return target, checkProductionTarget(target)
 }
 
-// downgradeProduction mirrors the Production at srcDir into the new folder
+// DowngradeProduction mirrors the Production at srcDir into the new folder
 // dstDir, downgrading the .prodset and every .prproj on the way and copying
 // everything else verbatim.
 //
@@ -254,12 +256,12 @@ func (c *cli) productionTarget(prodset string, requested int, verbose bool) (int
 // finished one. The partial folder is deliberately left on disk rather than
 // deleted — it may hold gigabytes of successfully copied media, and it is
 // clearly named, so what to do with it is the user's call.
-func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, verbose bool) error {
+func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion int, verbose bool) error {
 	prodset, err := findProdset(srcDir)
 	if err != nil {
 		return err
 	}
-	target, err := c.productionTarget(prodset, projectVersion, verbose)
+	target, err := d.productionTarget(prodset, projectVersion, verbose)
 	if err != nil {
 		return err
 	}
@@ -272,11 +274,11 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 
 	var projects, copied, failed int
 	fail := func(rel string, err error) {
-		_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", rel, err)
+		_, _ = fmt.Fprintf(d.errw(), "error: %s: %v\n", rel, err)
 		failed++
 	}
 
-	walkErr := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(srcDir, func(path string, entry fs.DirEntry, err error) error {
 		rel, relErr := filepath.Rel(srcDir, path)
 		if relErr != nil {
 			return relErr
@@ -291,19 +293,17 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 		}
 		dst := filepath.Join(dstDir, rel)
 
-		// Premiere identifies a Production by the .prodset whose basename matches
-		// the containing folder. The output folder is renamed ("<name>_downgraded"),
-		// so its settings file has to be renamed to match, or Premiere does not
-		// recognise the copy as a Production until it is renamed by hand. Only the
-		// Production's own top-level .prodset is retargeted; any other .prodset is
-		// left where it lies.
+		// Premiere identifies a Production by the .prodset whose basename
+		// matches the containing folder. The output folder is renamed
+		// ("<name>_downgraded"), so its settings file has to be renamed to
+		// match (only a top-level .prodset is renamed).
 		if path == prodset {
-			dst = filepath.Join(dstDir, filepath.Base(dstDir)+prodsetExt)
+			dst = filepath.Join(dstDir, filepath.Base(dstDir)+ProdsetExt)
 		}
 
-		info, infoErr := d.Info()
+		info, infoErr := entry.Info()
 		perm := fs.FileMode(0o644)
-		if d.IsDir() {
+		if entry.IsDir() {
 			perm = 0o755
 		}
 		if infoErr == nil {
@@ -311,14 +311,14 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 		}
 
 		switch {
-		case d.IsDir():
+		case entry.IsDir():
 			if err := os.Mkdir(dst, perm); err != nil {
 				fail(rel, err)
 				return fs.SkipDir // no destination to copy this subtree into
 			}
 			return nil
 
-		case d.Type()&fs.ModeSymlink != 0:
+		case entry.Type()&fs.ModeSymlink != 0:
 			// Recreated as a symlink rather than followed, so a link pointing
 			// outside the Production is not silently inlined and a link inside it
 			// still resolves within the copy.
@@ -332,26 +332,26 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 			}
 			return nil
 
-		case !d.Type().IsRegular():
+		case !entry.Type().IsRegular():
 			// Sockets, pipes, devices: nothing a Production legitimately contains
 			// and nothing meaningful to copy.
-			_, _ = fmt.Fprintf(c.err, "warning: skipped %s (not a regular file)\n", rel)
+			_, _ = fmt.Fprintf(d.errw(), "warning: skipped %s (not a regular file)\n", rel)
 			return nil
 		}
 
 		switch strings.ToLower(filepath.Ext(path)) {
-		case prodsetExt:
-			if err := c.downgradeProdset(path, dst, target, verbose); err != nil {
+		case ProdsetExt:
+			if err := d.downgradeProdset(path, dst, target, verbose); err != nil {
 				fail(rel, err)
 				return nil
 			}
 			if verbose && filepath.Base(dst) != filepath.Base(path) {
-				_, _ = fmt.Fprintf(c.out, "  renamed settings file %s -> %s \n",
+				_, _ = fmt.Fprintf(d.out(), "  renamed settings file %s -> %s \n",
 					filepath.Base(path), filepath.Base(dst))
 			}
 			projects++
-		case prprojExt:
-			err := c.downgrade(path, dst, target, verbose)
+		case PrprojExt:
+			err := d.Downgrade(path, dst, target, verbose)
 			var notOlder *notOlderError
 			if errors.As(err, &notOlder) {
 				// Already at or below the Production's target, so there is nothing
@@ -361,7 +361,7 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 					return nil
 				}
 				if verbose {
-					_, _ = fmt.Fprintf(c.out, "  %s: already version %d, copied unchanged\n",
+					_, _ = fmt.Fprintf(d.out(), "  %s: already version %d, copied unchanged\n",
 						rel, notOlder.source)
 				}
 				copied++
@@ -382,7 +382,7 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 		}
 		if verbose {
 			outRel, _ := filepath.Rel(dstDir, dst)
-			_, _ = fmt.Fprintf(c.out, "  wrote %s\n", outRel)
+			_, _ = fmt.Fprintf(d.out(), "  wrote %s\n", outRel)
 		}
 		return nil
 	})
@@ -394,7 +394,7 @@ func (c *cli) downgradeProduction(srcDir, dstDir string, projectVersion int, ver
 		return fmt.Errorf("%d of the Production's files could not be written; %s is incomplete",
 			failed, dstDir)
 	}
-	_, _ = fmt.Fprintf(c.out, "wrote %s (%d project files, %d other files copied)\n",
+	_, _ = fmt.Fprintf(d.out(), "wrote %s (%d project files, %d other files copied)\n",
 		dstDir, projects, copied)
 	return nil
 }

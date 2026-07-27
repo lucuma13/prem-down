@@ -16,11 +16,15 @@
 // list would require a signed Action Extension, which this signing-free
 // .workflow deliberately avoids.
 //
-// The service accepts any file (public.data) rather than a .prproj UTI: without
-// Premiere installed the extension maps to a dynamic UTI, and with it installed
-// to whatever UTI Adobe declares, so no fixed UTI list is reliable. The shell
-// step filters by extension instead and explains itself via a dialog when
-// handed the wrong file.
+// The service accepts any file (public.data) rather than a .prproj UTI.
+// NSSendFileTypes filters by UTI only and Adobe declares no UTI for .prproj, so
+// LaunchServices synthesises a dynamic UTI (dyn.ah62d4rv4ge81a6xusm10y). Those
+// dyn identifiers could be hardcoded, but Apple documents them as opaque
+// placeholders, and the moment any app exports a real declaration for the
+// extension the file stops matching and the Quick Action silently vanishes from
+// the menu. The workaround is to offer the quick action to all files, and
+// filter by extension on the shell step (which explains itself via a dialog
+// when handed the wrong file).
 //
 // It accepts .prodset — a Production's settings file — alongside .prproj, which
 // is how Productions are reached. Productions are folders, but the action is
@@ -31,7 +35,7 @@
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package main
+package integrate
 
 import (
 	_ "embed"
@@ -57,7 +61,9 @@ const (
 	// makes AppKit treat it as a template image (tinted to match the OS).
 	quickActionIconName = "workflowCustomImageTemplate"
 
-	fileManagerName = "Finder"
+	// FileManagerName is this platform's file manager, named in the CLI help so
+	// the text matches what the user will actually right-click in.
+	FileManagerName = "Finder"
 	integrationKind = "a Finder Quick Action"
 
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
@@ -504,8 +510,8 @@ func refreshServicesMenu() {
 	_ = exec.Command("/System/Library/CoreServices/pbs", "-flush").Run()
 }
 
-// maybeRunCOMServer is a no-op on macOS: the Finder Quick Action invokes
+// MaybeRunCOMServer is a no-op on macOS: the Finder Quick Action invokes
 // prem-down directly with the selected files, so there is no COM Drop Target
 // server activation to intercept (that mechanism is Windows-only; see
 // integrate_windows.go).
-func maybeRunCOMServer([]string) bool { return false }
+func MaybeRunCOMServer([]string) bool { return false }

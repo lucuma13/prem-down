@@ -2,13 +2,12 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
-	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/Lucuma13/prem-down/internal/premdown"
 )
 
 // testCLI is a cli whose streams are in-memory buffers, so a test can drive
@@ -32,667 +31,27 @@ func newTestCLI(stdin string) *testCLI {
 	}
 }
 
-// dcli is a cli that discards all output, for exercising downgrade and friends
-// where the test asserts on the written file rather than on what was printed.
-func dcli() *cli { return &cli{out: io.Discard, err: io.Discard, in: strings.NewReader("")} }
-
-// A VideoComponentParam as 2026 writes it when both bounds sit at their
-// per-parameter defaults: the LowerBound/UpperBound children are dropped. 2025
-// requires them present, so reconstruction must re-insert the false/true
-// sentinels (which 2025 then repopulates with the real bounds on load).
-const sparseVideoComponentParam = `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
-	<ParameterID>1</ParameterID>
-	<StartKeyframe>0,true,0,0,0,0,0,0</StartKeyframe>
-</VideoComponentParam>`
-
-// mustReconstruct, mustGetProjectVersion and mustSetProjectVersion unwrap the
-// error returns for tests that exercise well-formed inputs; the error paths
-// have their own dedicated tests below.
-func mustReconstruct(t *testing.T, xml string) (string, map[fieldKey]int) {
-	t.Helper()
-	out, stats, err := reconstructPositionalClasses(xml)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out, stats
-}
-
-func mustGetProjectVersion(t *testing.T, xml string) int {
-	t.Helper()
-	v, err := getProjectVersion(xml)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return v
-}
-
-func mustSetProjectVersion(t *testing.T, xml string, version int) string {
-	t.Helper()
-	out, err := setProjectVersion(xml, version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func TestRebuildInsertsMissingBounds(t *testing.T) {
-	out, stats := mustReconstruct(t, sparseVideoComponentParam)
-	for _, field := range reconstructFieldsByTag["VideoComponentParam"] {
-		want := "<" + field + ">" + reconstructDefaults[fieldKey{"VideoComponentParam", field}] + "</" + field + ">"
-		if !strings.Contains(out, want) {
-			t.Errorf("missing inserted field %s: output\n%s", field, out)
-		}
-		if stats[fieldKey{"VideoComponentParam", field}] != 1 {
-			t.Errorf("stats for %s = %d, want 1", field, stats[fieldKey{"VideoComponentParam", field}])
-		}
-	}
-	// Existing fields and indentation are untouched.
-	if !strings.Contains(out, "<ParameterID>1</ParameterID>") {
-		t.Errorf("existing fields disturbed:\n%s", out)
-	}
-	// Inserted fields reuse the instance's own separator (tab indentation).
-	if !strings.Contains(out, "\n\t<LowerBound>") {
-		t.Errorf("separator not reused for inserted fields:\n%s", out)
-	}
-}
-
-// A param where 2026 KEPT real (non-default) bounds must be left exactly as
-// Premiere wrote it — we must never clobber a real per-parameter value.
-func TestRebuildLeavesCompleteInstanceByteIdentical(t *testing.T) {
-	complete := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
-	<ParameterID>1</ParameterID>
-	<LowerBound>-150</LowerBound>
-	<UpperBound>150</UpperBound>
-</VideoComponentParam>`
-	out, stats := mustReconstruct(t, complete)
-	if out != complete {
-		t.Errorf("complete instance was modified:\n%s", out)
-	}
-	if len(stats) != 0 {
-		t.Errorf("stats non-empty for complete instance: %v", stats)
-	}
-}
-
-// When only one bound is missing, only that one is inserted; the present one is
-// left untouched.
-func TestRebuildInsertsOnlyMissingBound(t *testing.T) {
-	partial := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
-	<LowerBound>-150</LowerBound>
-</VideoComponentParam>`
-	out, stats := mustReconstruct(t, partial)
-	if !strings.Contains(out, "<LowerBound>-150</LowerBound>") {
-		t.Errorf("present bound was disturbed:\n%s", out)
-	}
-	if !strings.Contains(out, "<UpperBound>true</UpperBound>") {
-		t.Errorf("missing UpperBound not inserted:\n%s", out)
-	}
-	if stats[fieldKey{"VideoComponentParam", "LowerBound"}] != 0 {
-		t.Errorf("present LowerBound should not be re-inserted: %v", stats)
-	}
-	if stats[fieldKey{"VideoComponentParam", "UpperBound"}] != 1 {
-		t.Errorf("UpperBound stats = %d, want 1", stats[fieldKey{"VideoComponentParam", "UpperBound"}])
-	}
-}
-
-// The Lumetri color-selector param class has an unbounded UpperBound that 2025
-// won't recompute from the "true" sentinel, so we insert the literal marker for
-// it (keyed by ClassID) while ordinary params still get "true".
-func TestRebuildClassOverrideForColorUpperBound(t *testing.T) {
-	const colorCID = "0fde4e9f-f895-4ba3-b0fe-9a6feafda583"
-	color := `<VideoComponentParam ObjectID="10" ClassID="` + colorCID + `" Version="10">
-	<Name>Set color</Name>
-</VideoComponentParam>`
-	out, _ := mustReconstruct(t, color)
-	if !strings.Contains(out, "<UpperBound>18446744073709551615</UpperBound>") {
-		t.Errorf("color class did not get the unbounded UpperBound override:\n%s", out)
-	}
-	// LowerBound is unaffected by the override — still the plain sentinel.
-	if !strings.Contains(out, "<LowerBound>false</LowerBound>") {
-		t.Errorf("color class LowerBound should still be the false sentinel:\n%s", out)
-	}
-
-	// An ordinary (non-color) ClassID still gets the "true" sentinel.
-	ordinary := `<VideoComponentParam ObjectID="11" ClassID="cc12343e-f113-4d3b-ae05-b287db77d461" Version="10">
-	<Name>Opacity</Name>
-</VideoComponentParam>`
-	out, _ = mustReconstruct(t, ordinary)
-	if !strings.Contains(out, "<UpperBound>true</UpperBound>") {
-		t.Errorf("ordinary class should get the true sentinel, not the override:\n%s", out)
-	}
-}
-
-func TestRebuildSkipsObjectRefs(t *testing.T) {
-	// A reference (no Version attribute, self-closing) must not be touched.
-	ref := `<VideoComponentParam ObjectRef="10"/>`
-	out, stats := mustReconstruct(t, ref)
-	if out != ref || len(stats) != 0 {
-		t.Errorf("reference was modified: %q, stats %v", out, stats)
-	}
-}
-
-func TestSetAndGetProjectVersion(t *testing.T) {
-	xml := `<PremiereData Version="3">
-<Project ObjectID="1" ClassID="y" Version="45">
-</Project>
-</PremiereData>`
-	if v := mustGetProjectVersion(t, xml); v != 45 {
-		t.Fatalf("getProjectVersion = %d, want 45", v)
-	}
-	out := mustSetProjectVersion(t, xml, 43)
-	if !strings.Contains(out, `<Project ObjectID="1" ClassID="y" Version="43">`) {
-		t.Errorf("version not rewritten:\n%s", out)
-	}
-	// The PremiereData Version and everything else stay untouched.
-	if !strings.Contains(out, `<PremiereData Version="3">`) {
-		t.Errorf("PremiereData version disturbed:\n%s", out)
-	}
-}
-
 func TestUsage(t *testing.T) {
 	var b strings.Builder
 	usage(&b)
 	got := b.String()
 	// The help must name the tool, the --to option, and give live release
 	// examples (so a stale hard-coded list can't silently drift from releases).
-	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", "integrate", releaseExamples()} {
+	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", "integrate", premdown.ReleaseExamples()} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() output missing %q:\n%s", want, got)
 		}
 	}
 }
 
-// parseXML followed by render must reproduce the input byte-for-byte: that
-// round-trip invariant is what lets reconstructPositionalClasses leave
-// untouched instances exactly as Premiere wrote them. This also exercises the
-// self-closing, comment and declaration branches that the fixture path doesn't.
-func TestParseXMLRenderRoundTrip(t *testing.T) {
-	inputs := []string{
-		`<?xml version="1.0"?>
-<Root>
-	<Child Version="1">text</Child>
-	<SelfClosing Ref="7"/>
-	<!-- a comment -->
-	<Nested Version="2">
-		<Leaf>v</Leaf>
-	</Nested>
-</Root>`,
-		`plain text with no tags`,
-		`<Solo Version="1"/>`,
-		// A "<...>" token whose first char isn't a name char (leading space) is
-		// not a tag: parseXML passes it through as literal text, and it must
-		// still round-trip. Exercises the tagNameRe no-match branch.
-		`before < not a tag > after`,
-	}
-	for _, in := range inputs {
-		roots, err := parseXML(in)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var b strings.Builder
-		for _, r := range roots {
-			switch v := r.(type) {
-			case string:
-				b.WriteString(v)
-			case *el:
-				v.render(&b)
-			}
-		}
-		if got := b.String(); got != in {
-			t.Errorf("round-trip changed the input:\n--- in ---\n%s\n--- out ---\n%s", in, got)
-		}
-	}
-}
-
-func TestReleaseNamesNewestFirst(t *testing.T) {
-	got := releaseNames()
-	names := strings.Split(got, ", ")
-	if names[0] != "2026" {
-		t.Errorf("releaseNames should list newest first, got first = %q", names[0])
-	}
-	if names[len(names)-1] != "CS4" {
-		t.Errorf("releaseNames should list oldest last, got last = %q", names[len(names)-1])
-	}
-	if len(names) != len(releases) {
-		t.Errorf("releaseNames listed %d names, want %d", len(names), len(releases))
-	}
-}
-
-func TestReleaseExamples(t *testing.T) {
-	got := releaseExamples()
-	// The three releases just below the newest (2026), single-quoted, "..."-trailed.
-	if !strings.HasSuffix(got, "...") {
-		t.Errorf("releaseExamples should end with ..., got %q", got)
-	}
-	for _, want := range []string{"'2025'", "'2024'", "'2023'"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("releaseExamples = %q, missing %s", got, want)
-		}
-	}
-	// The newest release itself is skipped (examples are for downgrade targets).
-	if strings.Contains(got, "'2026'") {
-		t.Errorf("releaseExamples should skip the newest release, got %q", got)
-	}
-}
-
-func TestResolveRelease(t *testing.T) {
-	cases := map[string]int{
-		"2026":    45,
-		"2025":    43,
-		"CS4":     22,
-		"cs4":     22, // case-insensitive
-		"  2025 ": 43, //nolint:gocritic // mapKey: intentional whitespace, exercises resolveRelease's trimming
-		"cc2014":  27, // alias, case-insensitive
-		"CC2014":  27,
-	}
-	for name, want := range cases {
-		if got, err := resolveRelease(name); err != nil || got != want {
-			t.Errorf("resolveRelease(%q) = %d, %v; want %d, nil", name, got, err, want)
-		}
-	}
-}
-
-func TestPreviousRelease(t *testing.T) {
-	cases := []struct {
-		v        int
-		wantXML  int
-		wantName string
-		wantOK   bool
-	}{
-		{45, 43, "2025", true},   // 2026 -> 2025 (skips the absent v44)
-		{32, 30, "2015.1", true}, // 2017 -> 2015.1 (skips the absent v31)
-		{23, 22, "CS4", true},    // one step down lands on the oldest
-		{22, 0, "", false},       // nothing below the oldest known release
-	}
-	for _, c := range cases {
-		gotXML, gotName, gotOK := previousRelease(c.v)
-		if gotXML != c.wantXML || gotName != c.wantName || gotOK != c.wantOK {
-			t.Errorf("previousRelease(%d) = (%d, %q, %v), want (%d, %q, %v)",
-				c.v, gotXML, gotName, gotOK, c.wantXML, c.wantName, c.wantOK)
-		}
-	}
-}
-
-func TestUniquePath(t *testing.T) {
-	dir := t.TempDir()
-	base := filepath.Join(dir, "out.prproj")
-
-	// A free path is returned unchanged.
-	if got := uniquePath(base); got != base {
-		t.Errorf("uniquePath(free) = %q, want %q", got, base)
-	}
-
-	// Once taken, a -1 suffix is added before the extension.
-	if err := os.WriteFile(base, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	want1 := filepath.Join(dir, "out-1.prproj")
-	if got := uniquePath(base); got != want1 {
-		t.Errorf("uniquePath(taken) = %q, want %q", got, want1)
-	}
-
-	// With -1 also taken, it climbs to -2.
-	if err := os.WriteFile(want1, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	want2 := filepath.Join(dir, "out-2.prproj")
-	if got := uniquePath(base); got != want2 {
-		t.Errorf("uniquePath(taken twice) = %q, want %q", got, want2)
-	}
-}
-
-// A downgrade of a plain (un-gzipped) source that is already at or below the
-// dense-serialisation floor: only the <Project> version is re-gated, the output
-// is still written gzipped, and the rest of the XML is byte-identical.
-func TestDowngradePlainXMLInput(t *testing.T) {
-	xml := `<PremiereData Version="3">
-<Project ObjectID="1" ClassID="y" Version="42">
-</Project>
-</PremiereData>`
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	// verbose=true also exercises the "already compatible, only re-gating" report
-	// path taken for sources at/below the dense-serialisation floor.
-	if err := dcli().downgrade(src, out, 41, true); err != nil {
-		t.Fatal(err)
-	}
-
-	outXML := string(gunzipFile(t, out))
-	if v := mustGetProjectVersion(t, outXML); v != 41 {
-		t.Fatalf("output version = %d, want 41", v)
-	}
-	if outXML != mustSetProjectVersion(t, xml, 41) {
-		t.Errorf("pre-2026 plain input should only be re-gated, got:\n%s", outXML)
-	}
-}
-
-// downgrade with projectVersion == 0 auto-targets the release one step below the
-// source. The 2026 fixture (v45) must resolve to v43 (2025), skipping the absent
-// v44. Exercised with verbose=true to cover the reporting branch too.
-func TestDowngradeAutoTargetVerbose(t *testing.T) {
-	fixture := filepath.Join("testdata", "fixture_ppro26.prproj")
-	if _, err := os.Stat(fixture); err != nil {
-		t.Skipf("fixture %s not present", fixture)
-	}
-	tmp := t.TempDir()
-	out := filepath.Join(tmp, "out.prproj")
-	if err := dcli().downgrade(fixture, out, 0, true); err != nil {
-		t.Fatal(err)
-	}
-
-	outXML := string(gunzipFile(t, out))
-	if got := mustGetProjectVersion(t, outXML); got != 43 {
-		t.Fatalf("auto-target of v45 source = %d, want 43", got)
-	}
-}
-
-// downgrade returns an operational error (rather than exiting) for a file that
-// isn't a Premiere project, so a batch caller can report it and keep going. No
-// output file must be written for the failed input.
-func TestDowngradeReturnsErrorForNonPremiereFile(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "notes.txt")
-	if err := os.WriteFile(src, []byte("just some text"), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	if err := dcli().downgrade(src, out, 43, false); err == nil {
-		t.Fatal("expected an error for a non-Premiere file, got nil")
-	}
-	if _, err := os.Stat(out); err == nil {
-		t.Error("no output file should be written when the input is rejected")
-	}
-}
-
-// downgrade refuses a --to at or above the source release rather than stamping
-// a higher version — it is a downgrader, so target >= source is user error.
-// The error is returned (not fatal) so a batch caller can keep going, and no
-// output file is written.
-func TestDowngradeRejectsTargetNotBelowSource(t *testing.T) {
-	xml := `<PremiereData Version="3">
-<Project ObjectID="1" ClassID="y" Version="42">
-</Project>
-</PremiereData>`
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	// Equal to the source is refused just like above it.
-	if err := dcli().downgrade(src, out, 42, false); err == nil {
-		t.Fatal("expected an error for a target not below the source, got nil")
-	}
-	if _, err := os.Stat(out); err == nil {
-		t.Error("no output file should be written when the target is rejected")
-	}
-}
-
-// With auto-target (projectVersion == 0) on a source already at the oldest known
-// release, there is no earlier release to pick, so downgrade returns an error
-// rather than exiting.
-func TestDowngradeAutoTargetNoEarlierRelease(t *testing.T) {
-	xml := `<PremiereData Version="3">
-<Project ObjectID="1" ClassID="y" Version="22">
-</Project>
-</PremiereData>`
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	err := dcli().downgrade(src, out, 0, false)
-	if err == nil {
-		t.Fatal("expected an error when the source has no earlier release, got nil")
-	}
-	if !strings.Contains(err.Error(), "no known earlier release") {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if _, err := os.Stat(out); err == nil {
-		t.Error("no output file should be written when there is no target release")
-	}
-}
-
-// A file that starts with the gzip magic bytes but isn't valid gzip is reported
-// as an operational error (from the decompressor), not a hard exit.
-func TestDowngradeCorruptGzip(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	// gzip magic (0x1f 0x8b) followed by a truncated/invalid stream.
-	if err := os.WriteFile(src, []byte{0x1f, 0x8b, 0x08, 0x00}, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	if err := dcli().downgrade(src, out, 43, false); err == nil {
-		t.Fatal("expected an error for a corrupt gzip source, got nil")
-	}
-	if _, err := os.Stat(out); err == nil {
-		t.Error("no output file should be written for a corrupt gzip source")
-	}
-}
-
-// downgrade surfaces a read failure (rather than exiting) so a batch caller can
-// report it and continue. A directory passed as the source makes os.ReadFile
-// fail.
-func TestDowngradeReadError(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "out.prproj")
-	if err := dcli().downgrade(dir, out, 43, false); err == nil {
-		t.Fatal("expected a read error when the source is a directory, got nil")
-	}
-	if _, err := os.Stat(out); err == nil {
-		t.Error("no output file should be written when the source can't be read")
-	}
-}
-
-// A gzip stream with an intact header but a corrupted body passes gzip.NewReader
-// and fails later in io.ReadAll (a distinct branch from the bad-header case).
-func TestDowngradeCorruptGzipBody(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	if _, err := zw.Write([]byte(`<PremiereData Version="3"><Project ObjectID="1" ClassID="y" Version="45"></Project></PremiereData>`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	raw := buf.Bytes()
-	raw[len(raw)/2] ^= 0xFF // corrupt the deflate body, leaving the header intact
-
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	if err := os.WriteFile(src, raw, 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	out := filepath.Join(dir, "out.prproj")
-	if err := dcli().downgrade(src, out, 43, false); err == nil {
-		t.Fatal("expected a decompression error for a corrupt gzip body, got nil")
-	}
-}
-
-// downgrade returns the write failure (rather than exiting) when the output path
-// is unwritable — here its parent directory does not exist.
-func TestDowngradeWriteError(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "in.prproj")
-	xml := `<PremiereData Version="3">
-<Project ObjectID="1" ClassID="y" Version="42">
-</Project>
-</PremiereData>`
-	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
-		t.Fatal(err)
-	}
-	dst := filepath.Join(dir, "no-such-dir", "out.prproj")
-	if err := dcli().downgrade(src, dst, 41, false); err == nil {
-		t.Fatal("expected a write error for an unwritable destination, got nil")
-	}
-}
-
-func gunzipFile(t *testing.T, path string) []byte {
-	t.Helper()
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is a test-controlled temp file
-	if err != nil {
-		t.Fatal(err)
-	}
-	zr, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(zr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
-// TestPre2026PassThrough: a v43 source must only have its <Project> version
-// re-gated — no field insertion — and be otherwise byte-identical.
-func TestPre2026PassThrough(t *testing.T) {
-	fixture := filepath.Join("testdata", "fixture_ppro25.prproj")
-	if _, err := os.Stat(fixture); err != nil {
-		t.Skipf("fixture %s not present", fixture)
-	}
-	tmp := t.TempDir()
-	out := filepath.Join(tmp, "out.prproj")
-	if err := dcli().downgrade(fixture, out, 42, false); err != nil {
-		t.Fatal(err)
-	}
-
-	inXML := string(gunzipFile(t, fixture))
-	outXML := string(gunzipFile(t, out))
-	expected := mustSetProjectVersion(t, inXML, 42)
-	if outXML != expected {
-		t.Fatal("v43 pass-through output is not input-with-regated-version")
-	}
-}
-
-// TestDowngrade2026Fixture round-trips the real 2026 fixture (v45 -> v43) and
-// asserts the invariant 2025 requires: every VideoComponentParam definition
-// ends up with both LowerBound and UpperBound present. Also checks the Lumetri
-// color-class override and that the version is re-gated.
-func TestDowngrade2026Fixture(t *testing.T) {
-	fixture := filepath.Join("testdata", "fixture_ppro26.prproj")
-	if _, err := os.Stat(fixture); err != nil {
-		t.Skipf("fixture %s not present", fixture)
-	}
-	tmp := t.TempDir()
-	out := filepath.Join(tmp, "out.prproj")
-	if err := dcli().downgrade(fixture, out, 43, false); err != nil {
-		t.Fatal(err)
-	}
-	outXML := string(gunzipFile(t, out))
-
-	if v := mustGetProjectVersion(t, outXML); v != 43 {
-		t.Fatalf("output project version = %d, want 43", v)
-	}
-
-	// Every VideoComponentParam definition (has a Version attr; not an
-	// ObjectRef) must carry both bounds, or 2025 reports the project damaged.
-	defRe := regexp.MustCompile(`(?s)<VideoComponentParam[ \t\r\n][^>]*\bVersion="\d+"[^>]*>.*?</VideoComponentParam>`)
-	defs := defRe.FindAllString(outXML, -1)
-	if len(defs) == 0 {
-		t.Fatal("no VideoComponentParam definitions found in fixture output")
-	}
-	colorOverrides := 0
-	for _, d := range defs {
-		if !strings.Contains(d, "<LowerBound>") || !strings.Contains(d, "<UpperBound>") {
-			t.Fatalf("VideoComponentParam missing a bound after downgrade:\n%s", d)
-		}
-		if strings.Contains(d, `ClassID="0fde4e9f-f895-4ba3-b0fe-9a6feafda583"`) {
-			colorOverrides++
-			if !strings.Contains(d, "<UpperBound>18446744073709551615</UpperBound>") {
-				t.Errorf("color-class param did not get the unbounded UpperBound:\n%s", d)
-			}
-		}
-	}
-	if colorOverrides == 0 {
-		t.Error("expected at least one Lumetri color-class param in the fixture")
-	}
-}
-
-// --------------------------------------------------------------------------
-// Exit-path coverage. Because run/fatal write through the cli's injected streams
-// and thread the exit code back to main (rather than calling os.Exit mid-stack),
-// every fatal branch and the whole run() arg parser is reachable in-process:
-// build a cli over buffers with newTestCLI, call run, and read the code and the
-// captured output back directly — no pipe, panic seam, or global swapping.
-// --------------------------------------------------------------------------
-
-func TestResolveReleaseUnknownErrors(t *testing.T) {
-	_, err := resolveRelease("NoSuchRelease")
-	if err == nil {
-		t.Fatal("unknown release should return an error")
-	}
-	if !strings.Contains(err.Error(), "unknown release") {
-		t.Errorf("missing diagnostic: %v", err)
-	}
-}
-
-// A corrupt/unrecognised document surfaces as a returned error (never a hard
-// exit), so a batch caller can report the one bad file and keep going.
-
-func TestParseXMLErrors(t *testing.T) {
-	cases := map[string]string{
-		"unbalanced close": `</Orphan>`,
-		"mismatched close": `<A Version="1"></B>`,
-		"never closed":     `<A Version="1">text`,
-	}
-	for name, in := range cases {
-		_, err := parseXML(in)
-		if err == nil {
-			t.Errorf("%s: expected an error, got nil", name)
-			continue
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "xml") {
-			t.Errorf("%s: missing XML diagnostic: %q", name, err)
-		}
-	}
-}
-
-func TestReconstructPositionalClassesPropagatesParseError(t *testing.T) {
-	// The instance regex matches, but the region's XML is malformed (the inner
-	// mismatched close). The error must reach the caller instead of exiting.
-	bad := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
-	<LowerBound>1</Wrong>
-</VideoComponentParam>`
-	if _, _, err := reconstructPositionalClasses(bad); err == nil {
-		t.Fatal("expected a parse error for a malformed instance, got nil")
-	}
-}
-
-func TestSetProjectVersionWrongCount(t *testing.T) {
-	cases := map[string]string{
-		"zero matches": `<PremiereData Version="3"></PremiereData>`,
-		"two matches":  `<Project ObjectID="1" Version="45"><Project ObjectID="1" Version="45">`,
-	}
-	for name, xml := range cases {
-		_, err := setProjectVersion(xml, 43)
-		if err == nil || !strings.Contains(err.Error(), "exactly one") {
-			t.Errorf("%s: expected an 'exactly one' error, got %v", name, err)
-		}
-	}
-}
-
-func TestGetProjectVersionErrors(t *testing.T) {
-	// No <Project ObjectID="1"> tag at all -> no regex match.
-	if _, err := getProjectVersion("<PremiereData/>"); err == nil || !strings.Contains(err.Error(), "could not find") {
-		t.Errorf("absent project tag: expected a 'could not find' error, got %v", err)
-	}
-
-	// The regex only captures digits, so the only way to reach the Atoi error is
-	// a version with more digits than an int can hold (a range error).
-	huge := `<Project ObjectID="1" ClassID="y" Version="` + strings.Repeat("9", 40) + `">`
-	if _, err := getProjectVersion(huge); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Errorf("over-long version: expected an 'invalid' error, got %v", err)
-	}
-}
-
 // --------------------------------------------------------------------------
 // run() — the CLI arg parser and dispatch, driven over an in-memory cli.
+//
+// Because run/fatal write through the cli's injected streams and thread the
+// exit code back to main (rather than calling os.Exit mid-stack), every fatal
+// branch and the whole run() arg parser is reachable in-process: build a cli
+// over buffers with newTestCLI, call run, and read the code and the captured
+// output back directly — no pipe, panic seam, or global swapping.
 // --------------------------------------------------------------------------
 
 func TestRunHelpAndVersion(t *testing.T) {
@@ -877,5 +236,165 @@ func TestRunIntegrateDispatch(t *testing.T) {
 	}
 	if !strings.Contains(c.out.String(), "integrate") {
 		t.Errorf("integrate help not printed:\n%s", c.out)
+	}
+}
+
+// --------------------------------------------------------------------------
+// Production fixtures for the plan/run tests. Deliberately leaner than the
+// engine package's equivalents: these exercise how inputs become jobs, not the
+// byte-fidelity of a mirrored Production, so no sidecar or nested tree is
+// needed here.
+// --------------------------------------------------------------------------
+
+const prodsetFixture = `{"mMinCompatibleProjectVersion":45,"mProjectVersion":45}`
+
+const prodProject = `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="45">
+</Project>
+</PremiereData>`
+
+func writeFile(t *testing.T, path, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is built by the test itself
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// newProduction lays out a minimal Production: the settings file, a project
+// beside it, and one nested a folder down so "covered by a Production" has a
+// subtree to match against.
+func newProduction(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	writeFile(t, filepath.Join(dir, name+premdown.ProdsetExt), prodsetFixture)
+	writeFile(t, filepath.Join(dir, "Untitled"+premdown.PrprojExt), prodProject)
+	writeFile(t, filepath.Join(dir, "subfolder", "nested"+premdown.PrprojExt), prodProject)
+	return dir
+}
+
+// The context menu is keyed on the .prodset file, so the natural gesture is to
+// select it together with the projects. Those projects are already inside the
+// Production being mirrored; downgrading them again would scatter stray
+// _downgraded.prproj files through the user's original folder.
+func TestPlanSkipsProjectsCoveredByAProduction(t *testing.T) {
+	src := newProduction(t, "Sel")
+	c := newTestCLI("")
+	jobs, failed := c.plan([]string{
+		filepath.Join(src, "Sel"+premdown.ProdsetExt),
+		filepath.Join(src, "Untitled"+premdown.PrprojExt),
+		filepath.Join(src, "subfolder", "nested"+premdown.PrprojExt),
+	})
+	if failed {
+		t.Error("no input was missing; nothing should have failed")
+	}
+	if len(jobs) != 1 || !jobs[0].production || jobs[0].path != src {
+		t.Fatalf("expected one Production job for %s, got %+v", src, jobs)
+	}
+	if !strings.Contains(c.out.String(), "already part of the Production") {
+		t.Errorf("the skip should be explained to the user:\n%s", c.out)
+	}
+}
+
+// Selecting two Productions at once downgrades both.
+func TestPlanAcceptsMultipleProductions(t *testing.T) {
+	a := newProduction(t, "A")
+	b := newProduction(t, "B")
+	jobs, failed := newTestCLI("").plan([]string{
+		filepath.Join(a, "A"+premdown.ProdsetExt),
+		filepath.Join(b, "B"+premdown.ProdsetExt),
+	})
+	if failed {
+		t.Error("nothing was missing; the plan should not have failed")
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected one job per Production, got %d: %+v", len(jobs), jobs)
+	}
+	for _, j := range jobs {
+		if !j.production {
+			t.Errorf("job %q should be a Production", j.path)
+		}
+	}
+}
+
+// Naming the folder and its settings file together is one Production, not two —
+// otherwise the second pass would write a redundant "_downgraded-1" copy.
+func TestPlanDeduplicatesFolderAndProdset(t *testing.T) {
+	src := newProduction(t, "Dup")
+	jobs, _ := newTestCLI("").plan([]string{src, filepath.Join(src, "Dup"+premdown.ProdsetExt)})
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d: %+v", len(jobs), jobs)
+	}
+}
+
+// A project outside every named Production is its own job, even when a
+// Production is also selected.
+func TestPlanKeepsProjectsOutsideTheProduction(t *testing.T) {
+	src := newProduction(t, "Inside")
+	lone := writeFile(t, filepath.Join(t.TempDir(), "lone"+premdown.PrprojExt), prodProject)
+	jobs, _ := newTestCLI("").plan([]string{src, lone})
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d: %+v", len(jobs), jobs)
+	}
+}
+
+// End to end through run: the .prodset argument the context menu passes, with
+// no --to, must land a downgraded Production in the sibling folder.
+func TestRunDowngradesProductionFromProdsetArgument(t *testing.T) {
+	src := newProduction(t, "E2E")
+	c := newTestCLI("")
+	if code := c.run([]string{filepath.Join(src, "E2E"+premdown.ProdsetExt)}); code != 0 {
+		t.Fatalf("run should succeed, got code=%d\n%s", code, c.err)
+	}
+	dst := src + "_downgraded"
+	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+premdown.ProdsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
+		t.Errorf("auto target should be 2025 (43): %s", got)
+	}
+	if !strings.Contains(c.out.String(), "wrote "+dst) {
+		t.Errorf("the output folder should be reported:\n%s", c.out)
+	}
+}
+
+// A folder that holds no settings file is not a Production; run reports it and
+// exits non-zero rather than inventing one.
+func TestRunRejectsNonProductionFolder(t *testing.T) {
+	dir := t.TempDir()
+	c := newTestCLI("")
+	if code := c.run([]string{dir}); code != 1 {
+		t.Fatalf("expected code 1, got %d", code)
+	}
+	if !strings.Contains(c.err.String(), "not a Premiere Production") {
+		t.Errorf("unhelpful diagnostic:\n%s", c.err)
+	}
+}
+
+// The output folder must be one we create. If the name is taken, run picks a
+// free one rather than merging into or overwriting whatever is there.
+func TestRunPicksAFreeOutputFolder(t *testing.T) {
+	src := newProduction(t, "Twice")
+	prodset := filepath.Join(src, "Twice"+premdown.ProdsetExt)
+	c := newTestCLI("")
+	if code := c.run([]string{prodset}); code != 0 {
+		t.Fatalf("first run failed: %s", c.err)
+	}
+	if code := c.run([]string{prodset}); code != 0 {
+		t.Fatalf("second run failed: %s", c.err)
+	}
+	for _, dir := range []string{src + "_downgraded", src + "_downgraded-1"} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("expected %s to exist: %v", dir, err)
+		}
 	}
 }

@@ -2,7 +2,7 @@
 # Payload data and byte-exact test fixtures must never be reformatted.
 exclude: |
   (?x)^(
-    cmd/prem-down/testdata/.*
+    internal/premdown/testdata/.*
   )$
 repos:
   # Pre-commit configuration checks
