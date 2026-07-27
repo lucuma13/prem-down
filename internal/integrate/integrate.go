@@ -1,5 +1,5 @@
 // Package integrate wires prem-down into the OS file manager: right-click a
-// .prproj (or a Production's .prodset) and pick "Downgrade".
+// .prproj (or a Production's .prodset) and pick "Downgrade for older Premiere".
 //
 //   - macOS: installs a Finder Quick Action into ~/Library/Services
 //     (integrate_darwin.go). The Homebrew cask runs this automatically after
@@ -22,8 +22,8 @@ import (
 func usageIntegrate(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down integrate [--remove]
 
-Add a right-click "Downgrade" action for .prproj project files and .prodset
-Production settings files (%s).
+Add a right-click "Downgrade for older Premiere" action for .prproj project
+files and .prodset Production settings files (%s).
 
 Options:
       --remove    remove the right-click action instead

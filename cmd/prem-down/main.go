@@ -111,7 +111,7 @@ Options:
   -h, --help      show this help menu
 
 Subcommands:
-  integrate       add a right-click "Downgrade" action to %s (--remove undoes it)
+  integrate       add a right-click downgrade action to %s (--remove undoes it)
 `, premdown.ReleaseExamples(), integrate.FileManagerName)
 }
 

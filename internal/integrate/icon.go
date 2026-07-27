@@ -1,5 +1,6 @@
 // The Windows executable embeds the prem-down icon so Explorer's right-click
-// "Downgrade" entry shows it: both integrate_windows.go and the MSI
+// "Downgrade for older Premiere" entry shows it: both integrate_windows.go
+// and the MSI
 // (packaging/windows/prem-down.wxs) set that menu's Icon to the exe itself, and
 // Windows lifts the icon out of the binary's resources.
 //

@@ -29,7 +29,7 @@
 // It accepts .prodset — a Production's settings file — alongside .prproj, which
 // is how Productions are reached. Productions are folders, but the action is
 // deliberately NOT offered on folders: NSSendFileTypes filters by type only, so
-// public.folder would put "Downgrade" on every folder on the machine with no
+// public.folder would put the action on every folder on the machine with no
 // way to tell a Production apart. A .prodset only exists inside a Production,
 // so keying on it is precise; prem-down maps it back to its folder.
 //
@@ -54,7 +54,7 @@ import (
 var quickActionIcon []byte
 
 const (
-	quickActionMenuTitle = "Downgrade"
+	quickActionMenuTitle = "Downgrade for older Premiere"
 
 	// quickActionIconName is the NSIconName value and the basename (minus
 	// extension) of the TIFF in the bundle's Resources. The "Template" suffix

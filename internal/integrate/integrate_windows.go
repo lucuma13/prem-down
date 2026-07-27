@@ -27,7 +27,7 @@ import (
 
 const (
 	contextMenuKeyRoot = `HKCU\Software\Classes\SystemFileAssociations\`
-	contextMenuTitle   = "Downgrade"
+	contextMenuTitle   = "Downgrade for older Premiere"
 
 	// dropHandlerCLSID identifies prem-down's Drop Target COM handler. It is a
 	// fixed, private class id generated once for this project: it must stay
@@ -50,7 +50,7 @@ const (
 // contextMenuKeys are the verb keys, one per file type the entry appears on.
 //
 // A Production is a folder, but the entry is registered on its .prodset file
-// rather than on folders (a Directory verb would put "Downgrade" on every
+// rather than on folders (a Directory verb would put the entry on every
 // folder on the machine) A .prodset only ever exists inside a Production, so
 // keying on it is both precise and discoverable — and prem-down maps the file
 // back to its folder (see plan in main.go).

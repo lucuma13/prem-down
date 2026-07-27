@@ -19,7 +19,7 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 2. Alternatively, install with [Homebrew](https://brew.sh/): `brew install lucuma13/dit/prem-down`
 
-3. Check that the action is now available when right-clicking a Premiere Pro project file (.prproj), under "Quick Actions > Downgrade". If it isn't, switch it on manually with "Quick Actions > Customise…"
+3. Check that the action is now available when right-clicking a Premiere Pro project file (.prproj), under "Quick Actions > Downgrade for older Premiere". If it isn't, switch it on manually with "Quick Actions > Customise…"
 
 #### Windows
 
@@ -35,8 +35,8 @@ The tool is available on the context menu (right-click on any Premiere Pro proje
 
 Downgrade any project (.prproj) or a whole Production (.prodset) to the previous release:
 
-* macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade"
-* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade"
+* macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade for older Premiere"
+* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade for older Premiere"
 
 #### CLI (Terminal)
 
