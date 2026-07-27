@@ -18,6 +18,7 @@
 package premdown
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 )
 
 // PrprojExt is the extension of a Premiere project file and ProdsetExt is the
@@ -43,6 +45,10 @@ const (
 	// concept of a Production at all, so stamping one down to them produces a
 	// folder no Premiere will ever open — refused rather than written.
 	firstProductionProjectVersion = 38
+
+	// 2026 switched the .prodset to UTF-8, 2025 writes UTF-16LE (and we assume
+	// that same behaviour on earlier versions too).
+	firstUTF8ProdsetProjectVersion = 45
 )
 
 // A .prodset is plain JSON. Two keys carry the version: mProjectVersion, the
@@ -65,6 +71,48 @@ var (
 type prodsetVersions struct {
 	Project       *int `json:"mProjectVersion"`
 	MinCompatible *int `json:"mMinCompatibleProjectVersion"`
+}
+
+// The encoding is not cosmetic. Handed a UTF-8 settings file, 2025 reports
+// "invalid settings" and offers to overwrite it with defaults — which discards
+// the users settings for scratch disk, ingest and project settings.
+//
+// Everything else 2026 writes is tolerated: the 2026-only
+// mPreviousProductionPaths key and the fields 2026 omits from the embedded
+// mIngestSettingsStr and mProjectSettingsStr documents both survive the trip
+// untouched.
+func decodeProdset(raw []byte) (string, error) {
+	switch {
+	case len(raw) >= 2 && raw[0] == 0xff && raw[1] == 0xfe:
+		raw = raw[2:]
+	case len(raw) >= 2 && raw[0] == '{' && raw[1] == 0:
+	default:
+		return string(raw), nil
+	}
+	if len(raw)%2 != 0 {
+		return "", errors.New("does not look like a Production settings file: " +
+			"UTF-16 document ends mid-character")
+	}
+	u := make([]uint16, len(raw)/2)
+	for i := range u {
+		u[i] = binary.LittleEndian.Uint16(raw[2*i:])
+	}
+	return string(utf16.Decode(u)), nil
+}
+
+// encodeProdset renders the document in the encoding the target release
+// expects.
+func encodeProdset(js string, projectVersion int) []byte {
+	if projectVersion >= firstUTF8ProdsetProjectVersion {
+		return []byte(js)
+	}
+	// No BOM: Adobe writes none, and 2025 accepts the file without one.
+	u := utf16.Encode([]rune(js))
+	b := make([]byte, 2*len(u))
+	for i, c := range u {
+		binary.LittleEndian.PutUint16(b[2*i:], c)
+	}
+	return b
 }
 
 func parseProdset(raw []byte) (prodsetVersions, error) {
@@ -93,12 +141,35 @@ func setProdsetKey(js string, re *regexp.Regexp, name string, value int) (string
 	return re.ReplaceAllString(js, fmt.Sprintf("${1}%d", value)), nil
 }
 
-// verifyProdset is the self-check run on the rewritten settings before it is
+// readProdset reads one settings file and returns it as UTF-8 text together with
+// its version keys, whichever encoding it was written in.
+func readProdset(src string) (string, prodsetVersions, error) {
+	raw, err := readMaybeGzip(src)
+	if err != nil {
+		return "", prodsetVersions{}, err
+	}
+	js, err := decodeProdset(raw)
+	if err != nil {
+		return "", prodsetVersions{}, err
+	}
+	v, err := parseProdset([]byte(js))
+	return js, v, err
+}
+
+// verifyProdset is the self-check run on the rewritten settings before they are
 // written: the result must still parse as JSON, must read back as the requested
 // target, and must not leave a compatibility floor above that target (which
 // would bar the very release we are downgrading for). A failure means we would
 // otherwise write a Production that cannot open, so nothing is written.
-func verifyProdset(js string, wantVersion int) error {
+//
+// It takes the encoded bytes, so the re-parse also proves the encoding
+// round-trips — a document that decodes back to something other than what we
+// stamped is caught here rather than on the user's disk.
+func verifyProdset(out []byte, wantVersion int) error {
+	js, err := decodeProdset(out)
+	if err != nil {
+		return fmt.Errorf("verify: re-decode of the output failed: %w", err)
+	}
 	v, err := parseProdset([]byte(js))
 	if err != nil {
 		return fmt.Errorf("verify: re-parse of the output failed: %w", err)
@@ -116,11 +187,7 @@ func verifyProdset(js string, wantVersion int) error {
 // downgradeProdset rewrites one Production settings file. Mirrors downgrade's
 // contract: every failure is returned, never fatal, so a batch keeps going.
 func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbose bool) error {
-	raw, err := readMaybeGzip(src)
-	if err != nil {
-		return err
-	}
-	v, err := parseProdset(raw)
+	js, v, err := readProdset(src)
 	if err != nil {
 		return err
 	}
@@ -132,7 +199,7 @@ func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbo
 		return err
 	}
 
-	js, err := setProdsetKey(string(raw), prodsetVersionRe, "mProjectVersion", projectVersion)
+	js, err = setProdsetKey(js, prodsetVersionRe, "mProjectVersion", projectVersion)
 	if err != nil {
 		return err
 	}
@@ -145,16 +212,20 @@ func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbo
 			return err
 		}
 	}
+	out := encodeProdset(js, projectVersion)
 	if verbose {
 		_, _ = fmt.Fprintf(d.out(), "  set mProjectVersion -> %d\n", projectVersion)
 		if v.MinCompatible != nil && *v.MinCompatible > projectVersion {
 			_, _ = fmt.Fprintf(d.out(), "  set mMinCompatibleProjectVersion -> %d\n", projectVersion)
 		}
+		if projectVersion < firstUTF8ProdsetProjectVersion {
+			_, _ = fmt.Fprintf(d.out(), "  encoded settings as UTF-16LE for the target release\n")
+		}
 	}
-	if err := verifyProdset(js, projectVersion); err != nil {
+	if err := verifyProdset(out, projectVersion); err != nil {
 		return err
 	}
-	return writeNew(dst, []byte(js), 0o644)
+	return writeNew(dst, out, 0o644)
 }
 
 // checkProductionTarget refuses a target older than the first release that
@@ -230,11 +301,7 @@ func copyFile(src, dst string, perm os.FileMode) error {
 // Production is only coherent if its settings file and all its projects name
 // the same release, so the projects must not each pick their own auto target.
 func (d *Downgrader) productionTarget(prodset string, requested int, verbose bool) (int, error) {
-	raw, err := readMaybeGzip(prodset)
-	if err != nil {
-		return 0, err
-	}
-	v, err := parseProdset(raw)
+	_, v, err := readProdset(prodset)
 	if err != nil {
 		return 0, err
 	}

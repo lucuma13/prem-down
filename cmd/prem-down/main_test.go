@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/Lucuma13/prem-down/internal/premdown"
 )
@@ -273,6 +275,17 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
+// utf16le renders text the way Premiere writes a .prodset before 2026: UTF-16LE,
+// no BOM.
+func utf16le(s string) string {
+	u := utf16.Encode([]rune(s))
+	b := make([]byte, 2*len(u))
+	for i, c := range u {
+		binary.LittleEndian.PutUint16(b[2*i:], c)
+	}
+	return string(b)
+}
+
 // newProduction lays out a minimal Production: the settings file, a project
 // beside it, and one nested a folder down so "covered by a Production" has a
 // subtree to match against.
@@ -359,8 +372,11 @@ func TestRunDowngradesProductionFromProdsetArgument(t *testing.T) {
 		t.Fatalf("run should succeed, got code=%d\n%s", code, c.err)
 	}
 	dst := src + "_downgraded"
-	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+premdown.ProdsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
-		t.Errorf("auto target should be 2025 (43): %s", got)
+	// The settings land in the encoding the target release reads — UTF-16LE for
+	// anything before 2026 — so the stamped key is matched in that form.
+	settings := readFile(t, filepath.Join(dst, filepath.Base(dst)+premdown.ProdsetExt))
+	if want := utf16le(`"mProjectVersion":43`); !strings.Contains(settings, want) {
+		t.Errorf("auto target should be 2025 (43), UTF-16LE encoded: %q", settings)
 	}
 	if !strings.Contains(c.out.String(), "wrote "+dst) {
 		t.Errorf("the output folder should be reported:\n%s", c.out)

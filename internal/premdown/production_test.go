@@ -4,6 +4,7 @@ package premdown
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,24 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
+// readProdsetFile reads a settings file as text whatever encoding it is in, so
+// the assertions below can stay written in readable JSON. Which encoding was
+// actually used is asserted separately, by the tests that exist to check it.
+func readProdsetFile(t *testing.T, path string) string {
+	t.Helper()
+	js, err := decodeProdset([]byte(readFile(t, path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return js
+}
+
+// utf16le renders text the way every Premiere release before 2026 writes a
+// .prodset: UTF-16LE, no BOM.
+func utf16le(s string) string {
+	return string(encodeProdset(s, firstUTF8ProdsetProjectVersion-1))
+}
+
 // The whole point of rewriting the .prodset textually rather than re-encoding
 // it: both version keys move and NOTHING else does, so the embedded XML blob
 // and Adobe's exact formatting survive untouched.
@@ -77,7 +96,7 @@ func TestDowngradeProdsetChangesOnlyTheVersionKeys(t *testing.T) {
 	if err := silent().downgradeProdset(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	got := readFile(t, dst)
+	got := readProdsetFile(t, dst)
 	want := strings.NewReplacer(
 		`"mMinCompatibleProjectVersion":45`, `"mMinCompatibleProjectVersion":43`,
 		`"mProjectVersion":45`, `"mProjectVersion":43`,
@@ -102,7 +121,7 @@ func TestDowngradeProdsetRealFixtureChangesOnlyVersionKeys(t *testing.T) {
 	if err := silent().downgradeProdset(fixture, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	got := readFile(t, dst)
+	got := readProdsetFile(t, dst)
 	want := strings.NewReplacer(
 		`"mMinCompatibleProjectVersion":45`, `"mMinCompatibleProjectVersion":43`,
 		`"mProjectVersion":45`, `"mProjectVersion":43`,
@@ -127,8 +146,80 @@ func TestDowngradeProdsetNeverRaisesCompatibilityFloor(t *testing.T) {
 	if err := silent().downgradeProdset(src, dst, 43, false); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := readFile(t, dst), `{"mMinCompatibleProjectVersion":40,"mProjectVersion":43}`; got != want {
+	if got, want := readProdsetFile(t, dst), `{"mMinCompatibleProjectVersion":40,"mProjectVersion":43}`; got != want {
 		t.Errorf("floor should stay at 40:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+// 2025 writes the .prodset as UTF-16LE and it has to be readable.
+func TestDowngradeProdsetReadsUTF16Input(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt),
+		utf16le(`{"mMinCompatibleProjectVersion":43,"mProjectVersion":43}`))
+	dst := filepath.Join(dir, "out"+ProdsetExt)
+	if err := silent().downgradeProdset(src, dst, 42, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readProdsetFile(t, dst),
+		`{"mMinCompatibleProjectVersion":42,"mProjectVersion":42}`; got != want {
+		t.Errorf("UTF-16LE input should downgrade like any other:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+// The encoding is chosen by the target.
+func TestDowngradeProdsetEncodesForTheTargetRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		target   int
+		wantUTF8 bool
+	}{
+		{"2026 target keeps UTF-8", firstUTF8ProdsetProjectVersion, true},
+		{"2025 target re-encodes to UTF-16LE", 43, false},
+		{"2024 target re-encodes to UTF-16LE", 42, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Source one release above the target, so resolveTarget accepts it.
+			src := writeFile(t, filepath.Join(dir, "p"+ProdsetExt),
+				`{"mMinCompatibleProjectVersion":46,"mProjectVersion":46}`)
+			dst := filepath.Join(dir, "out"+ProdsetExt)
+			if err := silent().downgradeProdset(src, dst, tc.target, false); err != nil {
+				t.Fatal(err)
+			}
+			raw := readFile(t, dst)
+			if gotUTF8 := !strings.HasPrefix(raw, "{\x00"); gotUTF8 != tc.wantUTF8 {
+				t.Errorf("target %d: got UTF-8=%v, want UTF-8=%v (%q)",
+					tc.target, gotUTF8, tc.wantUTF8, raw[:min(12, len(raw))])
+			}
+			// Whatever the encoding, the document must still read back
+			// correctly.
+			if got := readProdsetFile(t, dst); !strings.Contains(got,
+				fmt.Sprintf(`"mProjectVersion":%d`, tc.target)) {
+				t.Errorf("target %d not stamped: %s", tc.target, got)
+			}
+		})
+	}
+}
+
+// A UTF-16LE document that ends mid-character means the file is truncated.
+func TestDecodeProdsetRefusesTruncatedUTF16(t *testing.T) {
+	raw := []byte(utf16le(`{"mProjectVersion":45}`))
+	if _, err := decodeProdset(raw[:len(raw)-1]); err == nil {
+		t.Error("expected a refusal for a UTF-16 document ending mid-character")
+	}
+}
+
+// The BOM Adobe does not write, honoured anyway: a settings file that picked
+// one up from some other tool should still be read rather than rejected as
+// garbage.
+func TestDecodeProdsetHonoursBOM(t *testing.T) {
+	js := `{"mProjectVersion":43}`
+	got, err := decodeProdset(append([]byte{0xff, 0xfe}, []byte(utf16le(js))...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != js {
+		t.Errorf("BOM should be consumed, not decoded:\ngot  %q\nwant %q", got, js)
 	}
 }
 
@@ -206,7 +297,7 @@ func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 
 	// The settings file is renamed to match the output folder (see the dedicated
 	// rename test); read it back under that name.
-	if got := readFile(t, filepath.Join(dst, filepath.Base(dst)+ProdsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
+	if got := readProdsetFile(t, filepath.Join(dst, filepath.Base(dst)+ProdsetExt)); !strings.Contains(got, `"mProjectVersion":43`) {
 		t.Errorf("settings not downgraded: %s", got)
 	}
 	for _, rel := range []string{"Untitled" + PrprojExt, filepath.Join("subfolder", "nested"+PrprojExt)} {
