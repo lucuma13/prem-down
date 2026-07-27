@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Lucuma13/prem-down/internal/premdown"
+	"github.com/lucuma13/prem-down/internal/premdown"
 )
 
 // The reg.exe invocations are what the MSI mirrors under HKLM and what Explorer

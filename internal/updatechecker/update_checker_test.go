@@ -78,14 +78,14 @@ func TestNewerAndParseVersion(t *testing.T) {
 }
 
 func TestUpgradeHintForPath(t *testing.T) {
-	c := New("Lucuma13/prem-down", "prem-down", "1.0.0")
+	c := New("lucuma13/prem-down", "prem-down", "1.0.0")
 	cases := []struct{ exe, wantVerb, wantTarget string }{
 		{"/opt/homebrew/Caskroom/prem-down/1.0.0/prem-down", "Run", "brew upgrade prem-down"},
 		{"/usr/local/Cellar/prem-down/1.0.0/bin/prem-down", "Run", "brew upgrade prem-down"},
 		{`C:\Users\x\AppData\Local\Microsoft\WinGet\Packages\p\prem-down.exe`, "Run", "winget upgrade -e --id lucuma13.prem-down"},
 		// Anything unrecognised (the .pkg and .msi installs) gets the page.
-		{"/usr/local/bin/prem-down", "Download", "https://github.com/Lucuma13/prem-down/releases/latest"},
-		{"", "Download", "https://github.com/Lucuma13/prem-down/releases/latest"},
+		{"/usr/local/bin/prem-down", "Download", "https://github.com/lucuma13/prem-down/releases/latest"},
+		{"", "Download", "https://github.com/lucuma13/prem-down/releases/latest"},
 	}
 	for _, tc := range cases {
 		verb, target := c.upgradeHintForPath(tc.exe)

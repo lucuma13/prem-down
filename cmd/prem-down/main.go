@@ -39,9 +39,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Lucuma13/prem-down/internal/integrate"
-	"github.com/Lucuma13/prem-down/internal/premdown"
-	"github.com/Lucuma13/prem-down/internal/updatechecker"
+	"github.com/lucuma13/prem-down/internal/integrate"
+	"github.com/lucuma13/prem-down/internal/premdown"
+	"github.com/lucuma13/prem-down/internal/updatechecker"
 )
 
 // githubRepo where releases are published, the opt-in update check reads it.

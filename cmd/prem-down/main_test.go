@@ -10,8 +10,8 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"github.com/Lucuma13/prem-down/internal/premdown"
-	"github.com/Lucuma13/prem-down/internal/updatechecker"
+	"github.com/lucuma13/prem-down/internal/premdown"
+	"github.com/lucuma13/prem-down/internal/updatechecker"
 )
 
 // testCLI is a cli whose streams are in-memory buffers, so a test can drive
