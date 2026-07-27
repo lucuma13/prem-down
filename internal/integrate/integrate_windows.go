@@ -42,6 +42,13 @@ const (
 	FileManagerName = "File Explorer"
 	integrationKind = "a File Explorer context-menu entry"
 
+	// ConsoleClosesOnExit says a run launched from this platform's file manager
+	// gets a console window that vanishes the instant the process exits, so the
+	// CLI has to hold it open to leave the result readable (the --gui pause in
+	// main.go). True here; Finder captures a Quick Action's output and shows it
+	// afterwards instead, so macOS has nothing to hold open.
+	ConsoleClosesOnExit = true
+
 	integrationInstalledMessage = `Installed the File Explorer context-menu entries: right-click a .prproj file,
 (or a .prodset file), and pick "` + contextMenuTitle + `".`
 	integrationRemovedMessage = "Removed the File Explorer context-menu entries."

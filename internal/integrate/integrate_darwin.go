@@ -66,6 +66,14 @@ const (
 	FileManagerName = "Finder"
 	integrationKind = "a Finder Quick Action"
 
+	// ConsoleClosesOnExit says a run launched from this platform's file manager
+	// gets a console window that vanishes the instant the process exits, so the
+	// CLI has to hold it open to leave the result readable. False here: a Quick
+	// Action has no console at all — Finder captures its output and shows it as a
+	// notification once prem-down has exited — so pausing would only strand the
+	// prompt inside that notification.
+	ConsoleClosesOnExit = false
+
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
 If it doesn't appear, enable it with Quick Actions > Customise…`
 	integrationRemovedMessage = "Removed the Finder Quick Action."
@@ -83,6 +91,12 @@ If it doesn't appear, enable it with Quick Actions > Customise…`
 // a dialog (failure) since there is no terminal to print to. osascript
 // receives strings via argv, never by splicing them into the AppleScript
 // source, so paths and messages cannot break quoting.
+//
+// --gui marks the run as launched from the file manager rather than a terminal.
+// On Windows that means "hold the console window open"; here there is no
+// console, and it only tells prem-down it may raise the update-check question
+// as a dialog (see internal/updatechecker). ConsoleClosesOnExit keeps the two
+// meanings apart.
 const quickActionScript = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 dialog() { /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) buttons {"OK"} default button 1 with title "prem-down" with icon caution' -e 'end run' "$1" >/dev/null; }
 for f in "$@"; do
@@ -93,7 +107,7 @@ for f in "$@"; do
     continue
     ;;
   esac
-  if out=$(prem-down "$f" 2>&1); then
+  if out=$(prem-down --gui "$f" 2>&1); then
     /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "prem-down"' -e 'end run' "$out" >/dev/null
   else
     dialog "$out"

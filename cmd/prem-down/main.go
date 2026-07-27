@@ -19,7 +19,7 @@
 //
 //	```
 //	prem-down myproject.prproj
-//	prem-down a.prproj b.prproj c.prproj   # batch: each file downgraded independently
+//	prem-down a.prproj b.prproj c.prproj          # batch
 //	prem-down MyProduction/MyProduction.prodset   # whole Production
 //	```
 //
@@ -41,11 +41,17 @@ import (
 
 	"github.com/Lucuma13/prem-down/internal/integrate"
 	"github.com/Lucuma13/prem-down/internal/premdown"
+	"github.com/Lucuma13/prem-down/internal/updatechecker"
 )
 
-// prem-down version; overridden at build time via
-// -ldflags "-X main.version=1.2.3"
-var version = "0.1"
+// githubRepo where releases are published, the opt-in update check reads it.
+const githubRepo = "lucuma13/prem-down"
+
+// prem-down version, overridden at build time via -ldflags "-X
+// main.version=1.2.3"
+//
+// "dev" is what an unstamped `go build` gets (deliberately not a number).
+var version = "dev"
 
 // cli carries the process's IO streams and the --gui flag so the command logic
 // writes through injected streams instead of the os.Stdout/os.Stderr/os.Stdin
@@ -54,18 +60,32 @@ var version = "0.1"
 type cli struct {
 	out io.Writer // normal output (progress, "wrote ...", help)
 	err io.Writer // diagnostics
-	in  io.Reader // stdin; read only for the --gui pause prompt
+	in  io.Reader // stdin; read only by the --gui pause and the update question
 
-	// gui is set by --gui, passed by the OS context-menu wiring (see
-	// integrate.go): the shell opens a console window that closes the instant
-	// the process exits, so wait for Enter before exiting to keep the result
-	// readable. Not shown in --help; it is plumbing, not a user-facing option.
+	// stdin is the single buffered view of in, built on first use by reader().
+	stdin *bufio.Reader
+
+	// gui is set by --gui, passed by the OS context-menu wiring, and means
+	// "this run came from the file manager, not a terminal". Two things follow
+	// from it: on Windows the shell opens a console window that closes the
+	// instant the process exits, so wait for Enter before exiting to keep the
+	// result readable (integrate.ConsoleClosesOnExit); and on either platform
+	// this is a surface that can put the update check's one-time question to
+	// the user.
 	gui bool
+
+	// updates is the opt-in update check
+	updates *updatechecker.Checker
 }
 
 // newCLI wires a cli to the real process streams; used by main.
 func newCLI() *cli {
-	return &cli{out: os.Stdout, err: os.Stderr, in: os.Stdin}
+	return &cli{
+		out:     os.Stdout,
+		err:     os.Stderr,
+		in:      os.Stdin,
+		updates: updatechecker.New(githubRepo, "prem-down", version),
+	}
 }
 
 // downgrader hands the engine this cli's streams, so engine progress and
@@ -75,12 +95,24 @@ func (c *cli) downgrader() *premdown.Downgrader {
 	return &premdown.Downgrader{Out: c.out, Err: c.err}
 }
 
+// reader is the cli's one buffered view of stdin. Everything that prompts goes
+// through it — the update-check question and the --gui pause both can, on the
+// same run — because a second bufio.Reader over the same stream would swallow
+// whatever the first one had already buffered past its own newline. Two
+// prompts sharing one reader can't eat each other's keystrokes.
+func (c *cli) reader() *bufio.Reader {
+	if c.stdin == nil {
+		c.stdin = bufio.NewReader(c.in)
+	}
+	return c.stdin
+}
+
 func (c *cli) pauseIfGUI() {
-	if !c.gui {
+	if !c.gui || !integrate.ConsoleClosesOnExit {
 		return
 	}
 	_, _ = fmt.Fprint(c.err, "\nPress Enter to close this window...")
-	_, _ = bufio.NewReader(c.in).ReadBytes('\n')
+	_, _ = c.reader().ReadBytes('\n')
 }
 
 // fatal reports a user error and returns the process exit code (1) for the
@@ -97,6 +129,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [input2.prproj ...] [--to RELEASE]
        prem-down production.prodset [--to RELEASE]
        prem-down integrate [--remove]
+       prem-down auto-update [on|off|status]
 
 Downgrade one or more Premiere Pro projects next to the original project.
 
@@ -112,6 +145,7 @@ Options:
 
 Subcommands:
   integrate       add a right-click downgrade action to %s (--remove undoes it)
+  auto-update     check GitHub for new releases: on, off or status (default off)
 `, premdown.ReleaseExamples(), integrate.FileManagerName)
 }
 
@@ -131,6 +165,15 @@ func (c *cli) run(args []string) int {
 	}
 	if len(args) > 0 && args[0] == "integrate" {
 		return integrate.Run(c.out, c.err, args[1:])
+	}
+	// Dispatched on the word alone, like "integrate": falling through to the flag
+	// parser would leave "auto-update" looking like an input file and report it
+	// as a missing project.
+	if len(args) > 0 && args[0] == "auto-update" {
+		if c.updates == nil {
+			return c.fatal("error: update checking is not available in this build")
+		}
+		return c.updates.Command(c.out, c.err, args[1:])
 	}
 
 	var positionals []string
@@ -208,6 +251,11 @@ func (c *cli) run(args []string) int {
 			continue
 		}
 		_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
+	}
+	// Only after a clean batch: a run that already reported an error is not a
+	// place to ask the user about update checks.
+	if !failed && c.updates != nil {
+		c.updates.Notify(c.out, c.reader(), c.gui)
 	}
 	c.pauseIfGUI()
 	if failed {
