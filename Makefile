@@ -6,7 +6,8 @@ BINARY  := $(notdir $(CURDIR))
 PKG     := ./cmd/$(BINARY)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
-GOBIN   := $(shell go env GOPATH)/bin
+GOBIN   := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
+EXE     := $(GOBIN)/$(BINARY)$(shell go env GOEXE)
 
 setup-dev: ## Install dev pre-requisites (Go, pre-commit)
 ifeq ($(OS),Windows_NT)
@@ -32,15 +33,15 @@ test: ## Run the test suite
 install: ## Install to $GOBIN and integrate the right-click action (macOS/Windows)
 	go install -trimpath -ldflags '$(LDFLAGS)' $(PKG)
 	@case "$$(uname -s)" in \
-	  Darwin|MINGW*|MSYS*|CYGWIN*) "$(GOBIN)/$(BINARY)" integrate ;; \
+	  Darwin|MINGW*|MSYS*|CYGWIN*) "$(EXE)" integrate ;; \
 	  *) echo "integrate: skipped (only macOS and Windows are supported)" ;; \
 	esac
 
 uninstall: ## Remove the installed binary and its right-click integration
 	@case "$$(uname -s)" in \
-	  Darwin|MINGW*|MSYS*|CYGWIN*) [ -x "$(GOBIN)/$(BINARY)" ] && "$(GOBIN)/$(BINARY)" integrate --remove || true ;; \
+	  Darwin|MINGW*|MSYS*|CYGWIN*) [ -x "$(EXE)" ] && "$(EXE)" integrate --remove || true ;; \
 	esac
-	rm -f "$(GOBIN)/$(BINARY)"
+	rm -f "$(EXE)"
 
 reinstall: ## Uninstall any previous copy, then install fresh
 	$(MAKE) uninstall
