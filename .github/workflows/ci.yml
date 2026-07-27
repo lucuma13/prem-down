@@ -25,11 +25,16 @@ jobs:
           go-version-file: go.mod
           cache: false # no dependencies, nothing to cache
       - name: go vet
-        run: go vet ./...
+        run: |
+          GOOS=darwin  go vet ./...
+          GOOS=windows go vet ./...
       - name: go mod tidy check
         run: go mod tidy -diff
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.5.0 ./...
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
+          GOOS=darwin  "$(go env GOPATH)/bin/govulncheck" ./...
+          GOOS=windows "$(go env GOPATH)/bin/govulncheck" ./...
       - name: cross-compile check
         run: |
           GOOS=darwin  GOARCH=arm64 go build ./...
@@ -43,8 +48,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Lint each target GOOS so platform-tagged files are checked.
-        goos: [darwin, windows, linux]
+        # Lint each target GOOS so platform-tagged files are checked. These are
+        # the only two: the package has no implementation for other platforms
+        # and does not compile for them, so linting linux would fail outright.
+        goos: [darwin, windows]
     steps:
       - name: Checkout source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
