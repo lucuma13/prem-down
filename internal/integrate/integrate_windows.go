@@ -38,6 +38,7 @@ const (
 	dropHandlerName  = "prem-down Premiere downgrade handler"
 	clsidKey         = `HKCU\Software\Classes\CLSID\` + dropHandlerCLSID
 
+	// FileManagerName is this platform's file manager (named in the CLI help).
 	FileManagerName = "File Explorer"
 	integrationKind = "a File Explorer context-menu entry"
 

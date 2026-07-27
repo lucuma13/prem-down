@@ -10,6 +10,8 @@ package integrate
 import "errors"
 
 const (
+	// FileManagerName stands in for this platform's file manager in the CLI
+	// help (unlike macOS and Windows there is no one name to use here).
 	FileManagerName             = "your file manager"
 	integrationKind             = "a file-manager entry"
 	integrationInstalledMessage = ""
