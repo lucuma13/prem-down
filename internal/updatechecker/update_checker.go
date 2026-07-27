@@ -221,6 +221,16 @@ func parseVersion(s string) []int {
 	return out
 }
 
+// Comparable reports whether a version string is one this package can compare:
+// a plain numeric release like "1.2.3" or "v1.2.3". Anything else — "dev", a
+// `git describe` string, a module pseudo-version — is a development build, and
+// a Checker holding one stays silent rather than guess at a comparison.
+//
+// Exported so a host deciding which version string to report can apply exactly
+// the test the checker will apply to it, instead of a second rule that could
+// drift from this one.
+func Comparable(version string) bool { return parseVersion(version) != nil }
+
 // Newer reports whether latest is a strictly higher release than current. An
 // unparsable version on either side yields false. Missing fields compare as
 // zero ("1.2" == "1.2.0").

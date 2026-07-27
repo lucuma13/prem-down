@@ -37,6 +37,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/lucuma13/prem-down/internal/integrate"
@@ -52,6 +53,39 @@ const githubRepo = "lucuma13/prem-down"
 //
 // "dev" is what an unstamped `go build` gets (deliberately not a number).
 var version = "dev"
+
+// init recovers the version for `go install <module>/cmd/prem-down@vX.Y.Z`,
+// which applies no ldflags and would otherwise leave the binary reporting
+// "dev". Go records the module version it resolved in the binary's build info,
+// so that install path can report the release it actually is — and take part in
+// the update check, which ignores versions it cannot compare.
+func init() {
+	if version != "dev" {
+		return // an explicit -ldflags stamp always wins
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v, ok := releaseVersion(info.Main.Version); ok {
+			version = v
+		}
+	}
+}
+
+// releaseVersion normalises a module version into the form prem-down reports,
+// reporting false for anything that is not a real release. A build from a
+// working tree records a pseudo-version ("v0.0.0-20260727225736-31d8679+dirty")
+// rather than a tag, and that has to keep reading as "dev" — it is not a
+// release, and claiming otherwise would both misreport --version and invite the
+// update check to compare against it.
+//
+// The test is updatechecker's own, so the version this reports and the version
+// the checker is willing to compare can never disagree. Split out from init to
+// be testable without a module-installed binary.
+func releaseVersion(modVersion string) (string, bool) {
+	if !updatechecker.Comparable(modVersion) {
+		return "", false
+	}
+	return strings.TrimPrefix(modVersion, "v"), true
+}
 
 // cli carries the process's IO streams and the --gui flag so the command logic
 // writes through injected streams instead of the os.Stdout/os.Stderr/os.Stdin

@@ -1,7 +1,9 @@
 ---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-# Template: __VERSION__, __SHA256__ and __PRODUCT_CODE__ are filled in by the
-# publish-windows-installer job in publish.yml from the MSI it just built.
+# Template: __VERSION__, __TAG__, __SHA256__ and __PRODUCT_CODE__ are filled in
+# by the publish-windows-installer job in publish.yml from the MSI it just
+# built. __VERSION__ is the bare number (0.2.0) and __TAG__ the git tag it came
+# from (v0.2.0) — the release is addressed by tag, the package by version.
 PackageIdentifier: lucuma13.prem-down
 PackageVersion: "__VERSION__"
 InstallerType: wix
@@ -18,7 +20,7 @@ FileExtensions:
   - prodset
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/lucuma13/prem-down/releases/download/__VERSION__/prem-down_installer_windows.msi
+    InstallerUrl: https://github.com/lucuma13/prem-down/releases/download/__TAG__/prem-down_installer_windows.msi
     InstallerSha256: __SHA256__
     ProductCode: "__PRODUCT_CODE__"
 ManifestType: installer

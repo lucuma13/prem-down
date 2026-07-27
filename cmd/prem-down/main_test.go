@@ -509,3 +509,37 @@ func TestRunSkipsTheUpdateCheckAfterAFailure(t *testing.T) {
 		t.Fatalf("a failed downgrade should return 1, got code=%d", code)
 	}
 }
+
+// releaseVersion decides what a `go install` build reports. Only a real tagged
+// release may be adopted: a working-tree build records a module pseudo-version,
+// which is not a release and has to keep reading as "dev".
+func TestReleaseVersion(t *testing.T) {
+	cases := []struct {
+		mod    string
+		want   string
+		wantOK bool
+	}{
+		{"v0.2.0", "0.2.0", true}, // go install ...@v0.2.0
+		{"0.2.0", "0.2.0", true},  // tolerate an unprefixed tag
+		{"v1.10.3", "1.10.3", true},
+		// Everything Go records for a build that is not from a release tag.
+		{"v0.0.0-20260727225736-31d867967f98", "", false},
+		{"v0.0.0-20260727225736-31d867967f98+dirty", "", false},
+		{"(devel)", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := releaseVersion(tc.mod)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("releaseVersion(%q) = %q, %v; want %q, %v", tc.mod, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+// The default build reports "dev": this test binary is built from the working
+// tree, so init must have found a pseudo-version and declined it.
+func TestVersionDefaultsToDevInAWorkingTreeBuild(t *testing.T) {
+	if version != "dev" {
+		t.Errorf("a working-tree build should report dev, got %q", version)
+	}
+}

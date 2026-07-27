@@ -61,13 +61,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Resolve version
+        shell: bash
+        run: echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - name: Build Windows binary
         shell: bash
         run: |
-          # Mirrors the GoReleaser build flags in .goreleaser.yaml; the icon is
-          # embedded automatically from the committed rsrc_windows_amd64.syso.
+          # Mirrors the GoReleaser build flags in .goreleaser.yaml (which stamps
+          # {{ .Version }}, also without the "v", so every channel's binary
+          # reports the same string); the icon is embedded automatically from the
+          # committed rsrc_windows_amd64.syso.
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
-            -trimpath -ldflags "-s -w -X main.version=$TAG" \
+            -trimpath -ldflags "-s -w -X main.version=$VERSION" \
             -o dist/prem-down.exe ./cmd/prem-down
       - name: Build MSI
         shell: bash
@@ -75,7 +80,7 @@ jobs:
           dotnet tool install --global wix --version "7.*"
           wix eula accept wix7
           # MSI ProductVersion must be numeric x.y.z; tags may be shorter (0.4).
-          IFS=. read -r major minor patch _ <<<"$TAG"
+          IFS=. read -r major minor patch _ <<<"$VERSION"
           wix build packaging/windows/prem-down.wxs -arch x64 \
             -d Version="${major:-0}.${minor:-0}.${patch:-0}" -d ExeDir=dist \
             -o "$MSI"
@@ -109,23 +114,27 @@ jobs:
             https://github.com/lucuma13/winget-pkgs wp
           cd wp
           git sparse-checkout set "manifests/l/lucuma13/prem-down"
-          dest="manifests/l/lucuma13/prem-down/$TAG"
+          dest="manifests/l/lucuma13/prem-down/$VERSION"
           mkdir -p "$dest"
+          # __VERSION__ and __TAG__ are deliberately separate: PackageVersion and
+          # the directory take the bare number, while InstallerUrl has to address
+          # the release by its actual tag.
           for f in ../packaging/winget/*.yaml; do
-            sed -e "s/__VERSION__/$TAG/g" \
+            sed -e "s/__VERSION__/$VERSION/g" \
+                -e "s/__TAG__/$TAG/g" \
                 -e "s/__SHA256__/$sha256/g" \
                 -e "s/__PRODUCT_CODE__/$PRODUCT_CODE/g" \
                 "$f" > "$dest/$(basename "$f")"
           done
           git config user.name "goreleaser-bot"
           git config user.email "goreleaser-bot@users.noreply.github.com"
-          git checkout -b "prem-down-$TAG"
+          git checkout -b "prem-down-$VERSION"
           git add "$dest"
-          git commit -m "New version: lucuma13.prem-down version $TAG"
-          git push origin "prem-down-$TAG"
+          git commit -m "New version: lucuma13.prem-down version $VERSION"
+          git push origin "prem-down-$VERSION"
           gh pr create --repo microsoft/winget-pkgs \
-            --head "lucuma13:prem-down-$TAG" \
-            --title "New version: lucuma13.prem-down version $TAG" \
+            --head "lucuma13:prem-down-$VERSION" \
+            --title "New version: lucuma13.prem-down version $VERSION" \
             --body "Automated submission from https://github.com/lucuma13/prem-down/releases/tag/$TAG"
   # macOS ships an optional .pkg installer alongside the Homebrew cask: it drops
   # a universal binary in /usr/local/bin (on the default PATH) and its
@@ -153,13 +162,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Resolve version
+        run: echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - name: Build universal binary
         run: |
           # Mirrors the GoReleaser build flags in .goreleaser.yaml, then lipo the
           # two arch slices into one binary that runs on Intel and Apple Silicon.
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
-              -trimpath -ldflags "-s -w -X main.version=$TAG" \
+              -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o "build-$arch" ./cmd/prem-down
           done
           mkdir -p payload/usr/local/bin
@@ -174,10 +185,10 @@ jobs:
           # into xattrs on extraction, so the installed tree is just the binary.
           chmod +x packaging/macos/scripts/postinstall
           pkgbuild --root payload --scripts packaging/macos/scripts \
-            --identifier com.lucuma13.prem-down --version "$TAG" \
+            --identifier com.lucuma13.prem-down --version "$VERSION" \
             --install-location / component.pkg
-          # Fold the version into the installer window title ("prem-down v<tag>").
-          sed "s/__VERSION__/$TAG/g" packaging/macos/distribution.xml > distribution.xml
+          # Fold the version into the installer window title ("prem-down v<version>").
+          sed "s/__VERSION__/$VERSION/g" packaging/macos/distribution.xml > distribution.xml
           productbuild --distribution distribution.xml \
             --resources packaging/macos/resources \
             --package-path . "$PKG"
