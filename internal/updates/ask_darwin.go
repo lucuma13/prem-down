@@ -3,10 +3,8 @@
 // A run launched from Finder has no terminal to ask in — a Quick Action's
 // output is captured and shown as a notification once the process has already
 // exited — so the question is raised as an AppleScript dialog.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package updatechecker
+package updates
 
 import (
 	"io"

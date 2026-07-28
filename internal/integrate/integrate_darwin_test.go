@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
-
 package integrate
 
 import (
@@ -39,9 +37,10 @@ func TestServiceEnableStatus(t *testing.T) {
 	}
 }
 
-// integrate.Run is the CLI glue for the subcommand: `integrate` installs the
-// Quick Action and `integrate --remove` takes it away. Drive it end-to-end with
-// HOME pointed at a temp dir so the real Services folder is never touched.
+// integrate.Run is the CLI glue for the subcommand: `integrate on` installs the
+// Quick Action, `integrate off` takes it away, and a bare `integrate` reports
+// status. Drive it end-to-end with HOME pointed at a temp dir so the real
+// Services folder is never touched.
 func TestIntegrateMainInstallAndRemove(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -62,15 +61,33 @@ func TestIntegrateMainInstallAndRemove(t *testing.T) {
 		t.Errorf("integrate --help should not install anything (stat err: %v)", err)
 	}
 
-	Run(io.Discard, io.Discard, nil)
-	if _, err := os.Stat(bundle); err != nil {
-		t.Fatalf("integrate did not create the bundle: %v", err)
+	// A bare invocation reports the status.
+	status := func(want string) {
+		t.Helper()
+		var out strings.Builder
+		if code := Run(&out, io.Discard, nil); code != 0 {
+			t.Fatalf("a bare integrate should return 0, got %d", code)
+		}
+		if got := strings.TrimSpace(out.String()); got != want {
+			t.Errorf("status = %q, want %q", got, want)
+		}
+	}
+	status("integrate: off")
+	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
+		t.Errorf("a bare integrate should not install anything (stat err: %v)", err)
 	}
 
-	Run(io.Discard, io.Discard, []string{"--remove"})
-	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
-		t.Errorf("integrate --remove left the bundle behind (stat err: %v)", err)
+	Run(io.Discard, io.Discard, []string{"on"})
+	if _, err := os.Stat(bundle); err != nil {
+		t.Fatalf("integrate on did not create the bundle: %v", err)
 	}
+	status("integrate: on")
+
+	Run(io.Discard, io.Discard, []string{"off"})
+	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
+		t.Errorf("integrate off left the bundle behind (stat err: %v)", err)
+	}
+	status("integrate: off")
 }
 
 // installIntegration must produce a complete Quick Action bundle under
@@ -175,7 +192,7 @@ func TestIntegrateReportsAFailureToWriteTheBundle(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", tc.home)
-			for _, args := range [][]string{nil, {"--remove"}} {
+			for _, args := range [][]string{nil, {"on"}, {"off"}} {
 				var out, errw strings.Builder
 				if code := Run(&out, &errw, args); code != 1 {
 					t.Errorf("%v: want exit 1, got %d (out %q)", args, code, out.String())

@@ -37,7 +37,7 @@ test: ## Run the test suite
 install: ## Install to $GOBIN and integrate the right-click action (macOS/Windows)
 	go install -trimpath -ldflags '$(LDFLAGS)' $(PKG)
 	@case "$$(uname -s)" in \
-	  Darwin|MINGW*|MSYS*|CYGWIN*) "$(EXE)" integrate ;; \
+	  Darwin|MINGW*|MSYS*|CYGWIN*) "$(EXE)" integrate on ;; \
 	  *) echo "integrate: skipped (only macOS and Windows are supported)" ;; \
 	esac
 
@@ -45,7 +45,7 @@ uninstall: ## Remove the installed binaries ($GOBIN and .pkg) and the right-clic
 	@case "$$(uname -s)" in \
 	  Darwin|MINGW*|MSYS*|CYGWIN*) \
 	    for b in "$(EXE)" "$(PKGEXE)"; do \
-	      if [ -x "$$b" ]; then "$$b" integrate --remove || true; break; fi; \
+	      if [ -x "$$b" ]; then "$$b" integrate off || true; break; fi; \
 	    done ;; \
 	esac
 	rm -f "$(EXE)"

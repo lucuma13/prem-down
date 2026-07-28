@@ -16,8 +16,6 @@
 // syscall.NewCallback) so prem-down stays a single dependency-free binary. Only
 // the two interfaces Explorer needs are implemented: IClassFactory (to vend the
 // handler) and IDropTarget (to receive the selection).
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package integrate
 

@@ -9,9 +9,7 @@
 //     (integrate_windows.go). The MSI installer ships equivalent HKLM keys, so
 //     this is only needed for portable installs.
 //
-// "integrate --remove" undoes the wiring.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
+// "integrate off" undoes the wiring.
 package integrate
 
 import (
@@ -27,15 +25,19 @@ import (
 type Downgrader func(files []string) (summary string, failed bool)
 
 func usageIntegrate(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `Usage: prem-down integrate [--remove]
+	_, _ = fmt.Fprintf(w, `Add a right-click "Downgrade for older Premiere" action on %s.
 
-Add a right-click "Downgrade for older Premiere" action for .prproj project
-files and .prodset Production settings files (%s).
+Usage: prem-down integrate [on|off]
+
+Actions:
+  on          add the action to the context menu
+  off         remove it
+
+With no action, the current status is shown.
 
 Options:
-      --remove    remove the right-click action instead
-  -h, --help      show this help
-`, integrationKind)
+  -h, --help  show this help
+`, FileManagerName)
 }
 
 // Run executes the "integrate" subcommand and returns the process exit code for
@@ -50,29 +52,48 @@ func Run(out, errw io.Writer, args []string) int {
 		_, _ = fmt.Fprintf(errw, format+"\n", a...)
 		return 1
 	}
-	remove := false
+	// The two directions are tracked separately so asking for both is an error.
+	// Bare command reports the status.
+	add, remove := false, false
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
 			usageIntegrate(out)
 			return 0
-		case "--remove":
+		case "on":
+			add = true
+		case "off":
 			remove = true
 		default:
 			usageIntegrate(errw)
-			return fatal("error: unknown option %s", a)
+			return fatal("error: unknown action %s", a)
 		}
 	}
-	if remove {
+	if add && remove {
+		usageIntegrate(errw)
+		return fatal("error: on and off cannot be combined")
+	}
+	switch {
+	case remove:
 		if err := removeIntegration(); err != nil {
 			return fatal("error: %v", err)
 		}
 		_, _ = fmt.Fprintln(out, integrationRemovedMessage)
-		return 0
+	case add:
+		if err := installIntegration(); err != nil {
+			return fatal("error: %v", err)
+		}
+		_, _ = fmt.Fprintln(out, integrationInstalledMessage)
+	default:
+		installed, err := integrationInstalled()
+		if err != nil {
+			return fatal("error: %v", err)
+		}
+		state := "off"
+		if installed {
+			state = "on"
+		}
+		_, _ = fmt.Fprintf(out, "integrate: %s\n", state)
 	}
-	if err := installIntegration(); err != nil {
-		return fatal("error: %v", err)
-	}
-	_, _ = fmt.Fprintln(out, integrationInstalledMessage)
 	return 0
 }

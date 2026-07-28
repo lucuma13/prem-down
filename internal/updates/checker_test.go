@@ -1,10 +1,8 @@
 // Tests for the opt-in update checker. Every one of them runs against an
 // httptest server and a settings file under t.TempDir, so the suite never
 // reaches GitHub, never reads the real settings, and never raises a prompt.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package updatechecker
+package updates
 
 import (
 	"bytes"
@@ -147,11 +145,11 @@ func TestConfigPathDefaultsToTheUserConfigDir(t *testing.T) {
 	if _, err := c.load(); err == nil {
 		t.Error("load should pass the configPath failure on")
 	}
-	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+	if err := c.save(settings{Updates: stateOn}); err == nil {
 		t.Error("save should pass the configPath failure on")
 	}
 	var o, e bytes.Buffer
-	if code := c.Command(&o, &e, []string{"status"}); code != 1 || !strings.Contains(e.String(), "error:") {
+	if code := c.Command(&o, &e, nil); code != 1 || !strings.Contains(e.String(), "error:") {
 		t.Errorf("the subcommand should report it: code=%d err=%q", code, e.String())
 	}
 }
@@ -170,7 +168,7 @@ func TestSaveReportsEveryFailure(t *testing.T) {
 	}
 	c := New("owner/repo", "my-tool", "1.0.0")
 	c.ConfigPath = filepath.Join(blocker, "config.json")
-	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+	if err := c.save(settings{Updates: stateOn}); err == nil {
 		t.Error("want an error when the settings directory cannot be created")
 	}
 
@@ -180,7 +178,7 @@ func TestSaveReportsEveryFailure(t *testing.T) {
 	if err := os.MkdirAll(tmp, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+	if err := c.save(settings{Updates: stateOn}); err == nil {
 		t.Error("want an error when the temp file cannot be written")
 	}
 
@@ -190,7 +188,7 @@ func TestSaveReportsEveryFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(c.ConfigPath, "child"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+	if err := c.save(settings{Updates: stateOn}); err == nil {
 		t.Error("want an error when the settings cannot be renamed into place")
 	}
 	entries, err := os.ReadDir(dir)
@@ -231,11 +229,11 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load of a missing file should succeed, got %v", err)
 	}
-	if got.AutoUpdate != stateUnset {
-		t.Errorf("missing file should read as unset, got %q", got.AutoUpdate)
+	if got.Updates != stateUnset {
+		t.Errorf("missing file should read as unset, got %q", got.Updates)
 	}
 
-	want := settings{AutoUpdate: stateOn, LastChecked: time.Now().UTC().Truncate(time.Second), LatestSeen: "v1.1.0"}
+	want := settings{Updates: stateOn, LastChecked: time.Now().UTC().Truncate(time.Second), LatestSeen: "v1.1.0"}
 	if err := c.save(want); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -243,7 +241,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got.AutoUpdate != want.AutoUpdate || got.LatestSeen != want.LatestSeen || !got.LastChecked.Equal(want.LastChecked) {
+	if got.Updates != want.Updates || got.LatestSeen != want.LatestSeen || !got.LastChecked.Equal(want.LastChecked) {
 		t.Errorf("round trip mismatch: got %+v, want %+v", got, want)
 	}
 
@@ -267,7 +265,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 // settings when the rename cannot happen.
 func TestSaveLeavesNoTempFileBehind(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
-	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+	if err := c.save(settings{Updates: stateOn}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(c.ConfigPath))
@@ -344,7 +342,7 @@ func TestNotifyRemembersNo(t *testing.T) {
 		t.Errorf("want no request after declining, got %d", hits.Load())
 	}
 	s, err := c.load()
-	if err != nil || s.AutoUpdate != stateOff {
+	if err != nil || s.Updates != stateOff {
 		t.Errorf("want the answer persisted as off, got %+v (err %v)", s, err)
 	}
 }
@@ -369,7 +367,7 @@ func TestNotifyAcceptsAndReports(t *testing.T) {
 		}
 	}
 	s, _ := c.load()
-	if s.AutoUpdate != stateOn || s.LatestSeen != "v1.1.0" || s.LastChecked.IsZero() {
+	if s.Updates != stateOn || s.LatestSeen != "v1.1.0" || s.LastChecked.IsZero() {
 		t.Errorf("want the check recorded, got %+v", s)
 	}
 }
@@ -403,7 +401,7 @@ func TestNotifyThrottlesRequestsNotNotices(t *testing.T) {
 // A clock jumping backwards must not freeze the check forever.
 func TestNotifyTreatsClockSkewAsStale(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
-	if err := c.save(settings{AutoUpdate: stateOn, LastChecked: time.Now().Add(24 * time.Hour)}); err != nil {
+	if err := c.save(settings{Updates: stateOn, LastChecked: time.Now().Add(24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	notify(c, false)
@@ -416,7 +414,7 @@ func TestNotifyTreatsClockSkewAsStale(t *testing.T) {
 func TestNotifyFailedRequestDoesNotStartTheClock(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	c.Endpoint = "http://127.0.0.1:0" // nothing listening
-	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+	if err := c.save(settings{Updates: stateOn}); err != nil {
 		t.Fatal(err)
 	}
 	if got := notify(c, false); got != "" {
@@ -475,7 +473,7 @@ func TestNotifyPassesStreamsToAsk(t *testing.T) {
 	if !strings.Contains(out.String(), "asked") {
 		t.Errorf("Ask should be able to write to out, got %q", out.String())
 	}
-	if s, _ := c.load(); s.AutoUpdate != stateOn {
+	if s, _ := c.load(); s.Updates != stateOn {
 		t.Errorf("want the stdin answer honoured as on, got %+v", s)
 	}
 }
@@ -551,28 +549,28 @@ func TestCommand(t *testing.T) {
 		t.Error("status must not create the settings file")
 	}
 
-	if code, out, _ = run("on"); code != 0 || !strings.Contains(out, "auto-update: on") {
+	if code, out, _ = run("on"); code != 0 || !strings.Contains(out, "updates: on") {
 		t.Errorf("on: code=%d out=%q", code, out)
 	}
-	if s, _ := c.load(); s.AutoUpdate != stateOn {
+	if s, _ := c.load(); s.Updates != stateOn {
 		t.Error("on should persist")
 	}
-	// status must report the stored setting without changing it.
-	if code, out, _ = run("status"); code != 0 || !strings.Contains(out, "auto-update: on") {
+	// A bare invocation must report the stored setting without changing it.
+	if code, out, _ = run(); code != 0 || !strings.Contains(out, "updates: on") {
 		t.Errorf("status: code=%d out=%q", code, out)
 	}
 	if !strings.Contains(out, c.ConfigPath) {
 		t.Errorf("status should name the settings file, got %q", out)
 	}
 
-	if code, out, _ = run("off"); code != 0 || !strings.Contains(out, "auto-update: off") {
+	if code, out, _ = run("off"); code != 0 || !strings.Contains(out, "updates: off") {
 		t.Errorf("off: code=%d out=%q", code, out)
 	}
-	if s, _ := c.load(); s.AutoUpdate != stateOff || s.LatestSeen != "" {
+	if s, _ := c.load(); s.Updates != stateOff || s.LatestSeen != "" {
 		t.Errorf("off should persist and drop any pending notice, got %+v", s)
 	}
 
-	if code, out, _ = run("--help"); code != 0 || !strings.Contains(out, "Usage: my-tool auto-update") {
+	if code, out, _ = run("--help"); code != 0 || !strings.Contains(out, "Usage: my-tool updates") {
 		t.Errorf("--help: code=%d out=%q", code, out)
 	}
 	if code, _, errw := run("maybe"); code != 1 || !strings.Contains(errw, "unknown action") {
@@ -585,12 +583,12 @@ func TestCommand(t *testing.T) {
 // something their program does not accept.
 func TestCommandNameOverride(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
-	c.CommandName = "updates"
+	c.CommandName = "check-updates" // deliberately not DefaultCommandName
 	var o, e bytes.Buffer
 	if code := c.Command(&o, &e, []string{"--help"}); code != 0 {
 		t.Fatalf("--help: code=%d", code)
 	}
-	if !strings.Contains(o.String(), "my-tool updates") {
+	if !strings.Contains(o.String(), "my-tool check-updates") {
 		t.Errorf("help should use the configured command name:\n%s", o.String())
 	}
 }
@@ -613,11 +611,11 @@ func TestCommandReportsAFailedSave(t *testing.T) {
 func TestCommandStatusReportsTheLastCheck(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	checked := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
-	if err := c.save(settings{AutoUpdate: stateOn, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
+	if err := c.save(settings{Updates: stateOn, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	if code := c.Command(&o, &e, []string{"status"}); code != 0 {
+	if code := c.Command(&o, &e, nil); code != 0 {
 		t.Fatalf("status: code=%d err=%q", code, e.String())
 	}
 	for _, want := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0"} {
@@ -635,7 +633,7 @@ func TestCommandReportsUnreadableSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	if code := c.Command(&o, &e, []string{"status"}); code != 1 || !strings.Contains(e.String(), "error:") {
+	if code := c.Command(&o, &e, nil); code != 1 || !strings.Contains(e.String(), "error:") {
 		t.Errorf("want a reported error, code=%d err=%q", code, e.String())
 	}
 }
@@ -684,7 +682,7 @@ func TestCheckNowRequiresOptIn(t *testing.T) {
 				return true
 			}
 			if tc.state != stateUnset {
-				if err := c.save(settings{AutoUpdate: tc.state}); err != nil {
+				if err := c.save(settings{Updates: tc.state}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -704,7 +702,7 @@ func TestCheckNowRequiresOptIn(t *testing.T) {
 // new" from six days ago is the wrong answer to give it.
 func TestCheckNowIgnoresTheThrottle(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
-	if err := c.save(settings{AutoUpdate: stateOn, LastChecked: c.now(), LatestSeen: "v1.0.0"}); err != nil {
+	if err := c.save(settings{Updates: stateOn, LastChecked: c.now(), LatestSeen: "v1.0.0"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -726,7 +724,7 @@ func TestCheckNowIgnoresTheThrottle(t *testing.T) {
 // Already current: nothing to say.
 func TestCheckNowQuietWhenCurrent(t *testing.T) {
 	c, _ := newTestChecker(t, "1.1.0", "v1.1.0")
-	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+	if err := c.save(settings{Updates: stateOn}); err != nil {
 		t.Fatal(err)
 	}
 	if u := c.CheckNow(); u != nil {
@@ -739,7 +737,7 @@ func TestCheckNowQuietWhenCurrent(t *testing.T) {
 func TestCheckNowFallsBackToTheCachedVersion(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	c.Endpoint = "http://127.0.0.1:1/dead"
-	if err := c.save(settings{AutoUpdate: stateOn, LatestSeen: "v1.2.0"}); err != nil {
+	if err := c.save(settings{Updates: stateOn, LatestSeen: "v1.2.0"}); err != nil {
 		t.Fatal(err)
 	}
 	u := c.CheckNow()
@@ -751,7 +749,7 @@ func TestCheckNowFallsBackToTheCachedVersion(t *testing.T) {
 // A dev build has no comparison to make, so the feature is inert here too.
 func TestCheckNowDoesNothingForUnComparableVersions(t *testing.T) {
 	c, hits := newTestChecker(t, "1.2.3-4-gabc1234", "v9.9.9")
-	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+	if err := c.save(settings{Updates: stateOn}); err != nil {
 		t.Fatal(err)
 	}
 	if u := c.CheckNow(); u != nil || hits.Load() != 0 {

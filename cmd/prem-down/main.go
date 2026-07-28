@@ -1,34 +1,23 @@
-// Package main implements prem-down, which downgrades an Adobe Premiere Pro
-// project file so an older version of Premiere can open it.
+// Command prem-down downgrades Adobe Premiere Pro projects and Productions so
+// an older release of Premiere can open them. It runs entirely offline: nothing
+// is ever uploaded.
 //
-// Operation runs completely **offline and local** to your machine – no data is
-// ever uploaded to the internet.
+// Each project is written next to the original; a Production's .prodset mirrors
+// the whole thing into a sibling "<name>_downgraded" folder.
 //
-// It fully supports the breaking changes introduced with **Premiere Pro 2026**.
-// The well-known method (gunzip the `.prproj`, lower the top-level project
-// version, re-gzip) no longer works reliably on Premiere 2026 files. The cause
-// is that 2026 uses sparser serialisation — it drops fields that older releases
-// expect present (and report the project as damaged if they are absent). So the
-// fix is bifold: re-insert those required fields, and set the project version
-// to the target release.
+// Usage:
 //
-// Premiere Pro Productions are supported too: passing its .prodset mirrors the
-// whole thing into a sibling "<name>_downgraded" folder. See production.go.
-//
-// Usage example:
-//
-//	```
 //	prem-down myproject.prproj
 //	prem-down a.prproj b.prproj c.prproj          # batch
 //	prem-down MyProduction/MyProduction.prodset   # whole Production
-//	```
+//
+//	prem-down integrate [on|off]                  # right-click action
+//	prem-down updates [on|off]                    # update check
 //
 // This file is the CLI shell only: stream plumbing, argument parsing, and
-// turning the positional arguments into jobs. The conversion itself lives in
-// downgrade.go (one project) and production.go (a whole Production); the field
-// re-insertion 2026 sources need lives in reconstruct.go.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
+// turning the positional arguments into jobs. How a downgrade actually works —
+// including what Premiere 2026 changed — is documented on the internal/premdown
+// package.
 package main
 
 import (
@@ -42,7 +31,7 @@ import (
 
 	"github.com/lucuma13/prem-down/internal/integrate"
 	"github.com/lucuma13/prem-down/internal/premdown"
-	"github.com/lucuma13/prem-down/internal/updatechecker"
+	"github.com/lucuma13/prem-down/internal/updates"
 )
 
 // githubRepo where releases are published, the opt-in update check reads it.
@@ -82,11 +71,11 @@ func init() {
 // release, and claiming otherwise would both misreport --version and invite the
 // update check to compare against it.
 //
-// The test is updatechecker's own, so the version this reports and the version
+// The test is the updates package's own, so the version this reports and the version
 // the checker is willing to compare can never disagree. Split out from init to
 // be testable without a module-installed binary.
 func releaseVersion(modVersion string) (string, bool) {
-	if !updatechecker.Comparable(modVersion) {
+	if !updates.Comparable(modVersion) {
 		return "", false
 	}
 	return strings.TrimPrefix(modVersion, "v"), true
@@ -107,8 +96,8 @@ type cli struct {
 	// Windows COM handler, which calls run directly rather than through a flag.
 	gui bool
 
-	// updates is the opt-in update check
-	updates *updatechecker.Checker
+	// checker is the opt-in update check
+	checker *updates.Checker
 }
 
 // newCLI wires a cli to the real process streams; used by main.
@@ -117,7 +106,7 @@ func newCLI() *cli {
 		out:     os.Stdout,
 		err:     os.Stderr,
 		in:      os.Stdin,
-		updates: updatechecker.New(githubRepo, "prem-down", version),
+		checker: updates.New(githubRepo, "prem-down", version),
 	}
 }
 
@@ -138,12 +127,10 @@ func (c *cli) fatal(format string, args ...any) int {
 }
 
 func usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `Usage: prem-down input.prproj [input2.prproj ...] [--to RELEASE]
-       prem-down production.prodset [--to RELEASE]
-       prem-down integrate [--remove]
-       prem-down auto-update [on|off|status]
+	_, _ = fmt.Fprintf(w, `Downgrade Premiere Pro projects (or Productions) next to the originals.
 
-Downgrade one or more Premiere Pro projects (or Productions) next to the originals.
+Usage: prem-down input.prproj [--to RELEASE]
+       prem-down production.prodset [--to RELEASE]
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
@@ -152,8 +139,8 @@ Options:
   -h, --help      show this help menu
 
 Subcommands:
-  integrate       add a right-click downgrade action to %s (--remove undoes it)
-  auto-update     check GitHub for new releases: on, off or status (default off)
+  integrate       right-click downgrade action to %s: on / off
+  updates         check for new releases automatically: on / off
 `, premdown.ReleaseExamples(), integrate.FileManagerName)
 }
 
@@ -169,19 +156,19 @@ func main() {
 // gui is set because a context-menu run is the surface the update check may
 // raise its question on.
 func comDowngrade(files []string) (string, bool) {
-	return dialogRun(updatechecker.New(githubRepo, "prem-down", version), files)
+	return dialogRun(updates.New(githubRepo, "prem-down", version), files)
 }
 
 // dialogRun runs files through a cli whose streams are buffers and folds the
 // result into dialog text.
-func dialogRun(updates *updatechecker.Checker, files []string) (string, bool) {
+func dialogRun(checker *updates.Checker, files []string) (string, bool) {
 	var out, errOut bytes.Buffer
 	c := &cli{
 		out:     &out,
 		err:     &errOut,
 		in:      strings.NewReader(""),
 		gui:     true,
-		updates: updates,
+		checker: checker,
 	}
 	code := c.run(files)
 	return comSummary(out.String(), errOut.String()), code != 0 && code != exitUnrecognisedRelease
@@ -220,13 +207,13 @@ func (c *cli) run(args []string) int {
 		return integrate.Run(c.out, c.err, args[1:])
 	}
 	// Dispatched on the word alone, like "integrate": falling through to the flag
-	// parser would leave "auto-update" looking like an input file and report it
+	// parser would leave "updates" looking like an input file and report it
 	// as a missing project.
-	if len(args) > 0 && args[0] == "auto-update" {
-		if c.updates == nil {
+	if len(args) > 0 && args[0] == updates.DefaultCommandName {
+		if c.checker == nil {
 			return c.fatal("error: update checking is not available in this build")
 		}
-		return c.updates.Command(c.out, c.err, args[1:])
+		return c.checker.Command(c.out, c.err, args[1:])
 	}
 
 	var positionals []string
@@ -316,7 +303,7 @@ func (c *cli) run(args []string) int {
 	}
 	// Only after a clean batch: a run that already reported an error is not a
 	// place to ask the user about update checks.
-	if !failed && c.updates != nil {
+	if !failed && c.checker != nil {
 		c.notifyUpdates(unrecognised)
 	}
 	if failed {
@@ -347,13 +334,13 @@ func (c *cli) run(args []string) int {
 // answers, rather than to c.out with the "wrote ..." lines.
 func (c *cli) notifyUpdates(unrecognised bool) {
 	if unrecognised {
-		if u := c.updates.CheckNow(); u != nil {
+		if u := c.checker.CheckNow(); u != nil {
 			_, _ = fmt.Fprintf(c.err, "\nA newer prem-down (%s) is available and may recognise that "+
 				"release — worth downgrading again with it. %s: %s\n", u.Version, u.Verb, u.Target)
 			return
 		}
 	}
-	c.updates.Notify(c.out, c.in, c.gui)
+	c.checker.Notify(c.out, c.in, c.gui)
 }
 
 // job is one unit of work: either a lone .prproj (production false, path is the

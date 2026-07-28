@@ -3,8 +3,6 @@
 //
 // Two halves: a formatting-preserving mini-DOM (parseXML/el/render) and the
 // pass that uses it (rebuild/reconstructPositionalClasses/verifyDowngraded).
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package premdown
 

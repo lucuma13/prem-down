@@ -32,8 +32,6 @@
 // public.folder would put the action on every folder on the machine with no
 // way to tell a Production apart. A .prodset only exists inside a Production,
 // so keying on it is precise; prem-down maps it back to its folder.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package integrate
 
@@ -64,7 +62,6 @@ const (
 	// FileManagerName is this platform's file manager, named in the CLI help so
 	// the text matches what the user will actually right-click in.
 	FileManagerName = "Finder"
-	integrationKind = "a Finder Quick Action"
 
 	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
 If it doesn't appear, enable it with Quick Actions > Customise…`
@@ -86,7 +83,7 @@ If it doesn't appear, enable it with Quick Actions > Customise…`
 //
 // --gui marks the run as launched from the file manager rather than a terminal,
 // which tells prem-down it may raise the update check's one-time question as a
-// dialog (see internal/updatechecker). Windows reaches the same state without
+// dialog (see internal/updates). Windows reaches the same state without
 // the flag: its COM handler calls run directly.
 const quickActionScript = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 dialog() { /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) buttons {"OK"} default button 1 with title "prem-down" with icon caution' -e 'end run' "$1" >/dev/null; }
@@ -506,6 +503,26 @@ func removeIntegration() error {
 	_ = disableServiceMenu()
 	refreshServicesMenu()
 	return nil
+}
+
+// integrationInstalled reports whether the Quick Action bundle is in place. The
+// bundle is what installIntegration writes and removeIntegration deletes, so its
+// presence is the setting; the NSServicesStatus preference that enables it in
+// the menu is best-effort on both paths and would make a false negative out of a
+// Quick Action the user only has to tick in Settings > Extensions.
+func integrationInstalled() (bool, error) {
+	bundle, err := quickActionPath()
+	if err != nil {
+		return false, err
+	}
+	switch _, err := os.Stat(bundle); {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err // unreadable is not the same as absent
+	}
 }
 
 // refreshServicesMenu asks the pasteboard server to rescan ~/Library/Services

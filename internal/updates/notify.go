@@ -1,9 +1,7 @@
 // The runtime half of the check: the first-run question, the throttle, and the
 // notice itself.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package updatechecker
+package updates
 
 import (
 	"fmt"
@@ -52,7 +50,7 @@ func (c *Checker) prompt(in io.Reader, out io.Writer) bool {
 // console it already owns. The first-run question is only asked there:
 // those are the surfaces where the user has no other way to discover the
 // setting, and the ones with somewhere to put a question. A plain terminal run
-// stays silent and scriptable; that user has the auto-update subcommand and
+// stays silent and scriptable; that user has the updates subcommand and
 // --help.
 //
 // Every failure past the question is silent.
@@ -72,13 +70,13 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 		return // unreadable settings: never nag, never check
 	}
 
-	if s.AutoUpdate == stateUnset {
+	if s.Updates == stateUnset {
 		if !mayAsk {
 			return
 		}
-		s.AutoUpdate = stateOff
+		s.Updates = stateOff
 		if c.prompt(in, out) {
-			s.AutoUpdate = stateOn
+			s.Updates = stateOn
 		}
 		// Persist the answer before acting on it: if the request below fails, or
 		// the process is killed, the user must still not be asked a second time.
@@ -87,7 +85,7 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 			return
 		}
 	}
-	if s.AutoUpdate != stateOn {
+	if s.Updates != stateOn {
 		return
 	}
 
@@ -134,7 +132,7 @@ func (c *Checker) CheckNow() *Upgrade {
 		return nil // dev build: no comparison to make
 	}
 	s, err := c.load()
-	if err != nil || s.AutoUpdate != stateOn {
+	if err != nil || s.Updates != stateOn {
 		return nil
 	}
 	if latest, err := c.latest(); err == nil {

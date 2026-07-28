@@ -14,8 +14,6 @@
 // single prem-down process, which reports on all of them in one message box. A
 // command verb ("exe" "%1"), by contrast, is invoked once per selected file, so
 // a selection would become one process and one message box each.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package integrate
 
@@ -32,7 +30,7 @@ const (
 
 	// dropHandlerCLSID identifies prem-down's Drop Target COM handler. It is a
 	// fixed, private class id generated once for this project: it must stay
-	// constant so upgrades and "integrate --remove" locate the same
+	// constant so upgrades and "integrate off" locate the same
 	// registration, and it must not be reused for anything else. The handler it
 	// points at is the Drop Target COM server in multi_selection_windows.go.
 	dropHandlerCLSID = "{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}"
@@ -41,7 +39,6 @@ const (
 
 	// FileManagerName is this platform's file manager (named in the CLI help).
 	FileManagerName = "File Explorer"
-	integrationKind = "a File Explorer context-menu entry"
 
 	integrationInstalledMessage = `Installed the File Explorer context-menu entries: right-click a .prproj file,
 (or a .prodset file), and pick "` + contextMenuTitle + `".`
@@ -108,6 +105,19 @@ func installIntegration() error {
 		}
 	}
 	return nil
+}
+
+// integrationInstalled reports whether the context-menu entry is registered. It
+// takes every verb key being present as "on": a partial registration (an
+// interrupted install, or one that predates the .prodset entry) reads as off, so
+// `integrate on` is the reported fix and it repairs the missing keys.
+func integrationInstalled() (bool, error) {
+	for _, key := range contextMenuKeys {
+		if err := exec.Command("reg", "query", key).Run(); err != nil { //nolint:gosec // G204: key is one of the package constants above, not external input
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func removeIntegration() error {

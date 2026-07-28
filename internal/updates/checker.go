@@ -1,12 +1,10 @@
-// Package updatechecker is a portable, opt-in GitHub release update checker.
+// Package updates is a portable, opt-in GitHub release update checker.
 //
 // It asks once whether to look for new releases, remembers the answer forever,
 // and — if the answer was yes — contacts GitHub's "latest release" API to
 // report that a newer version exists. It is notify-only: a one-line notice
 // naming the right upgrade command is the whole feature.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
-package updatechecker
+package updates
 
 import (
 	"encoding/json"
@@ -22,7 +20,7 @@ import (
 	"time"
 )
 
-// The three values of settings.AutoUpdate. Unset is distinct from Off so the
+// The three values of settings.Updates. Unset is distinct from Off so the
 // first-run question can be asked exactly once: "never asked" and "asked, said
 // no" have to be told apart, or a user who declines gets asked forever.
 const (
@@ -38,7 +36,7 @@ const DefaultInterval = 7 * 24 * time.Hour
 
 // DefaultCommandName is the subcommand Command implements, used in its own
 // help text.
-const DefaultCommandName = "auto-update"
+const DefaultCommandName = "updates"
 
 // requestTimeout bounds the whole check. The real work is already done by the
 // time this runs, so the only thing at stake is how long the console window (or
@@ -78,7 +76,7 @@ func New(repo, product, version string) *Checker {
 // between runs: what the user answered, when the last request went out, and
 // what it returned.
 type settings struct {
-	AutoUpdate string `json:"auto_update"`
+	Updates string `json:"updates"`
 	// omitzero, not omitempty: encoding/json's omitempty has no effect on a
 	// struct, so a never-checked zero time would otherwise be written out as
 	// "0001-01-01T00:00:00Z" in a file the user is invited to look at.

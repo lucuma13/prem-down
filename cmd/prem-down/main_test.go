@@ -17,7 +17,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/lucuma13/prem-down/internal/premdown"
-	"github.com/lucuma13/prem-down/internal/updatechecker"
+	"github.com/lucuma13/prem-down/internal/updates"
 )
 
 // testCLI is a cli whose streams are in-memory buffers, so a test can drive
@@ -45,11 +45,11 @@ func newTestCLI(t *testing.T, stdin string) *testCLI {
 	// A fixed release-shaped version, not the build's own: the real one is "dev"
 	// unless ldflags stamp it, and the checker treats an uncomparable version as
 	// a dev build and does nothing — which would silently neuter these tests.
-	updates := updatechecker.New(githubRepo, "prem-down", "1.0.0")
-	updates.ConfigPath = filepath.Join(t.TempDir(), "config.json")
-	updates.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	checker := updates.New(githubRepo, "prem-down", "1.0.0")
+	checker.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	checker.Ask = func(string, io.Reader, io.Writer) bool { return false }
 	return &testCLI{
-		cli: &cli{out: out, err: errBuf, in: strings.NewReader(stdin), updates: updates},
+		cli: &cli{out: out, err: errBuf, in: strings.NewReader(stdin), checker: checker},
 		out: out,
 		err: errBuf,
 	}
@@ -61,7 +61,7 @@ func TestUsage(t *testing.T) {
 	got := b.String()
 	// The help must name the tool, the --to option, and give live release
 	// examples (so a stale hard-coded list can't silently drift from releases).
-	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", "integrate", "auto-update", premdown.ReleaseExamples()} {
+	for _, want := range []string{"Usage: prem-down", "--to", "--verbose", "--version", "integrate", "updates", premdown.ReleaseExamples()} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() output missing %q:\n%s", want, got)
 		}
@@ -457,32 +457,34 @@ func writeProject(t *testing.T, dir, name string) string {
 	return path
 }
 
-// run dispatches "auto-update" the same way it dispatches "integrate" — before
+// run dispatches "updates" the same way it dispatches "integrate" — before
 // any flag parsing, so the word is never mistaken for an input file.
-func TestRunDispatchesAutoUpdate(t *testing.T) {
+func TestRunDispatchesUpdates(t *testing.T) {
 	c := newTestCLI(t, "")
-	if code := c.run([]string{"auto-update"}); code != 0 {
-		t.Fatalf("auto-update should return 0, got code=%d", code)
+	if code := c.run([]string{"updates"}); code != 0 {
+		t.Fatalf("updates should return 0, got code=%d", code)
 	}
-	if !strings.Contains(c.out.String(), "auto-update:") {
+	if !strings.Contains(c.out.String(), "updates:") {
 		t.Errorf("status not printed:\n%s", c.out)
 	}
 	c = newTestCLI(t, "")
-	if code := c.run([]string{"auto-update", "on"}); code != 0 {
-		t.Fatalf("auto-update on should return 0, got code=%d", code)
+	if code := c.run([]string{"updates", "on"}); code != 0 {
+		t.Fatalf("updates on should return 0, got code=%d", code)
 	}
-	if !strings.Contains(c.out.String(), "auto-update: on") {
+	if !strings.Contains(c.out.String(), "updates: on") {
 		t.Errorf("setting not applied:\n%s", c.out)
 	}
 }
 
-// A build with no update checker wired in still has to answer the subcommand,
-// and saying so is better than reporting "auto-update" as a missing project
-// file — which is what falling through to the flag parser would produce.
-func TestRunAutoUpdateWithoutAChecker(t *testing.T) {
+// newCLI and dialogRun both wire a checker, so a nil one never reaches run in a
+// shipped build; the guard is there so a missing checker is reported rather
+// than dereferenced — a panic on the COM path surfaces as an empty message box.
+// Reporting it also beats letting the word fall through to the flag parser,
+// which would collect it as a positional and call it a missing project file.
+func TestRunUpdatesWithoutAChecker(t *testing.T) {
 	c := newTestCLI(t, "")
-	c.updates = nil
-	if code := c.run([]string{"auto-update", "status"}); code != 1 {
+	c.checker = nil
+	if code := c.run([]string{"updates"}); code != 1 {
 		t.Fatalf("want exit 1, got code=%d", code)
 	}
 	if !strings.Contains(c.err.String(), "not available") {
@@ -517,11 +519,11 @@ func TestNewCLIWiresTheProcessStreams(t *testing.T) {
 	if c.gui {
 		t.Error("a plain invocation is not a file-manager run")
 	}
-	if c.updates == nil {
+	if c.checker == nil {
 		t.Fatal("newCLI should wire the update checker")
 	}
-	if c.updates.Version != version || c.updates.Repo != githubRepo {
-		t.Errorf("the checker should carry this build's identity, got %+v", c.updates)
+	if c.checker.Version != version || c.checker.Repo != githubRepo {
+		t.Errorf("the checker should carry this build's identity, got %+v", c.checker)
 	}
 }
 
@@ -553,7 +555,7 @@ func TestRunAsksAboutUpdatesOnlyFromTheFileManager(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestCLI(t, "")
 			asks := 0
-			c.updates.Ask = func(string, io.Reader, io.Writer) bool { asks++; return false }
+			c.checker.Ask = func(string, io.Reader, io.Writer) bool { asks++; return false }
 			src := writeProject(t, t.TempDir(), "in.prproj")
 			if code := c.run(append(tc.args, src)); code != 0 {
 				t.Fatalf("want a clean run, got code=%d err=%s", code, c.err)
@@ -574,7 +576,7 @@ func TestRunSkipsTheUpdateCheckAfterAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := newTestCLI(t, "")
-	c.updates.Ask = func(string, io.Reader, io.Writer) bool {
+	c.checker.Ask = func(string, io.Reader, io.Writer) bool {
 		t.Error("a failed run must not raise the update question")
 		return true
 	}
@@ -646,9 +648,9 @@ func TestComSummary(t *testing.T) {
 
 // testChecker is an update checker that cannot touch the real settings, reach
 // the network, or put a dialog on screen.
-func testChecker(t *testing.T) *updatechecker.Checker {
+func testChecker(t *testing.T) *updates.Checker {
 	t.Helper()
-	u := updatechecker.New(githubRepo, "prem-down", "1.0.0")
+	u := updates.New(githubRepo, "prem-down", "1.0.0")
 	u.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	u.Ask = func(string, io.Reader, io.Writer) bool { return false }
 	return u
@@ -794,7 +796,7 @@ func stubReleases(t *testing.T, c *testCLI, tag string) *atomic.Int32 {
 		_, _ = io.WriteString(w, `{"tag_name":"`+tag+`"}`)
 	}))
 	t.Cleanup(srv.Close)
-	c.updates.Endpoint = srv.URL
+	c.checker.Endpoint = srv.URL
 	return &hits
 }
 
@@ -802,7 +804,7 @@ func stubReleases(t *testing.T, c *testCLI, tag string) *atomic.Int32 {
 // first-run question would have.
 func optIn(t *testing.T, c *testCLI) {
 	t.Helper()
-	if code := c.updates.Command(io.Discard, io.Discard, []string{"on"}); code != 0 {
+	if code := c.checker.Command(io.Discard, io.Discard, []string{"on"}); code != 0 {
 		t.Fatalf("failed to opt in, code=%d", code)
 	}
 }
@@ -863,8 +865,8 @@ func TestRunStillWarnsWhenNoUpgradeIsAvailable(t *testing.T) {
 func TestRunUnrecognisedReleaseWithoutOptInStillAsks(t *testing.T) {
 	c := newTestCLI(t, "")
 	asks := 0
-	c.updates.Ask = func(string, io.Reader, io.Writer) bool { asks++; return false }
-	c.updates.Endpoint = "http://127.0.0.1:1/dead" // opting out means it is never reached
+	c.checker.Ask = func(string, io.Reader, io.Writer) bool { asks++; return false }
+	c.checker.Endpoint = "http://127.0.0.1:1/dead" // opting out means it is never reached
 	src := writeFutureProject(t, t.TempDir(), "in.prproj")
 
 	if code := c.run([]string{"--gui", src}); code != exitUnrecognisedRelease {
@@ -904,12 +906,12 @@ func TestRunKnownReleaseUsesTheOrdinaryNotice(t *testing.T) {
 // successful conversion an error: every file was written, and the caution is
 // already in the text. Only a real failure gets the error icon.
 func TestDialogRunDoesNotFlagAnUnrecognisedReleaseAsFailed(t *testing.T) {
-	updates := updatechecker.New(githubRepo, "prem-down", "1.0.0")
-	updates.ConfigPath = filepath.Join(t.TempDir(), "config.json")
-	updates.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	checker := updates.New(githubRepo, "prem-down", "1.0.0")
+	checker.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	checker.Ask = func(string, io.Reader, io.Writer) bool { return false }
 	src := writeFutureProject(t, t.TempDir(), "in.prproj")
 
-	summary, failed := dialogRun(updates, []string{src})
+	summary, failed := dialogRun(checker, []string{src})
 	if failed {
 		t.Error("an unrecognised release converted every file; it is not a failure")
 	}

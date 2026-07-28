@@ -30,7 +30,7 @@ changelog:
 # A cask (not a formula) is used because Homebrew steers pre-built binaries
 # to casks. The postflight hook strips the com.apple.quarantine attribute so
 # the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run,
-# then installs the Finder Quick Action ("prem-down integrate") so editors get
+# then installs the Finder Quick Action ("prem-down integrate on") so editors get
 # the right-click action without touching a terminal. The uninstall preflight
 # removes the Quick Action while the binary is still staged; it must never
 # fail, or it would wedge `brew uninstall`.
@@ -53,12 +53,12 @@ homebrew_casks:
         install: |
           if OS.mac? && File.exist?("#{staged_path}/prem-down")
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/prem-down"]
-            system_command "#{staged_path}/prem-down", args: ["integrate"]
+            system_command "#{staged_path}/prem-down", args: ["integrate", "on"]
           end
       pre:
         uninstall: |
           if OS.mac? && File.exist?("#{staged_path}/prem-down")
-            system_command "#{staged_path}/prem-down", args: ["integrate", "--remove"], must_succeed: false
+            system_command "#{staged_path}/prem-down", args: ["integrate", "off"], must_succeed: false
           end
 # Windows is NOT built or published from here: it ships only as an MSI (so the
 # Explorer context menu installs/uninstalls with the package), which GoReleaser

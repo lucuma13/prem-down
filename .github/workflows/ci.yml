@@ -180,22 +180,22 @@ jobs:
         shell: pwsh
         run: |
           $exe = 'C:\Program Files\prem-down\prem-down.exe'
-          & $exe integrate
-          if ($LASTEXITCODE -ne 0) { throw 'integrate failed' }
+          & $exe integrate on
+          if ($LASTEXITCODE -ne 0) { throw 'integrate on failed' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down\DropTarget' /v CLSID
           if ($LASTEXITCODE -ne 0) { throw 'HKCU .prproj DropTarget CLSID missing after integrate' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prodset\shell\prem-down\DropTarget' /v CLSID
           if ($LASTEXITCODE -ne 0) { throw 'HKCU .prodset DropTarget CLSID missing after integrate' }
           reg query 'HKCU\Software\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}\LocalServer32'
           if ($LASTEXITCODE -ne 0) { throw 'HKCU COM LocalServer registration missing after integrate' }
-          & $exe integrate --remove
-          if ($LASTEXITCODE -ne 0) { throw 'integrate --remove failed' }
+          & $exe integrate off
+          if ($LASTEXITCODE -ne 0) { throw 'integrate off failed' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prproj\shell\prem-down' 2>$null
-          if ($LASTEXITCODE -eq 0) { throw 'HKCU .prproj context-menu key still present after --remove' }
+          if ($LASTEXITCODE -eq 0) { throw 'HKCU .prproj context-menu key still present after integrate off' }
           reg query 'HKCU\Software\Classes\SystemFileAssociations\.prodset\shell\prem-down' 2>$null
-          if ($LASTEXITCODE -eq 0) { throw 'HKCU .prodset context-menu key still present after --remove' }
+          if ($LASTEXITCODE -eq 0) { throw 'HKCU .prodset context-menu key still present after integrate off' }
           reg query 'HKCU\Software\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}' 2>$null
-          if ($LASTEXITCODE -eq 0) { throw 'HKCU CLSID registration still present after --remove' }
+          if ($LASTEXITCODE -eq 0) { throw 'HKCU CLSID registration still present after integrate off' }
           # The absent-key reg queries above exit 1 (key absent) as the success case;
           # reset so the pwsh step doesn't inherit that non-zero code as its exit status.
           exit 0

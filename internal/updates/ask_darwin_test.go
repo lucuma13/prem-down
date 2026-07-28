@@ -1,6 +1,4 @@
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
-
-package updatechecker
+package updates
 
 import (
 	"os"

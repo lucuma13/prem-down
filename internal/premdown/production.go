@@ -12,8 +12,6 @@
 // Premiere identifies a Production by the .prodset whose basename matches the
 // containing folder, so the settings file is renamed to the new folder name as
 // it is written ("<name>_downgraded.prodset").
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package premdown
 

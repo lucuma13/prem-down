@@ -1,10 +1,8 @@
-// The "auto-update" subcommand: the way to set the check from a terminal, for
+// The "updates" subcommand: the way to set the check from a terminal, for
 // users who never see the first-run question because they do not use the
 // file-manager integration, and for anyone changing their mind later.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package updatechecker
+package updates
 
 import (
 	"fmt"
@@ -20,22 +18,22 @@ func (c *Checker) commandName() string {
 }
 
 func (c *Checker) usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `Usage: %s %s [on|off|status]
+	_, _ = fmt.Fprintf(w, `Check for new %s versions.
 
-Check GitHub for newer %s releases and mention them after a successful run.
-This is the only network request %s ever makes.
+Usage: %s %s [on|off]
 
 Actions:
-  on          check for new versions (at most once a week)
+  on          check for new versions automatically
   off         never check
-  status      show the current setting (the default when no action is given)
+
+With no action, the current status is shown.
 
 Options:
   -h, --help  show this help
-`, c.Product, c.commandName(), c.Product, c.Product)
+`, c.Product, c.Product, c.commandName())
 }
 
-// Command executes the auto-update subcommand and returns the process exit code
+// Command executes the updates subcommand and returns the process exit code
 // for the caller to return, writing through the injected streams rather than
 // os.Stdout/os.Stderr.
 func (c *Checker) Command(out, errw io.Writer, args []string) int {
@@ -44,13 +42,13 @@ func (c *Checker) Command(out, errw io.Writer, args []string) int {
 		return 1
 	}
 
-	action := "status" // a bare invocation reports, it never changes anything
+	action := "" // no action: report, and change nothing
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
 			c.usage(out)
 			return 0
-		case "on", "off", "status":
+		case "on", "off":
 			action = a
 		default:
 			c.usage(errw)
@@ -65,12 +63,12 @@ func (c *Checker) Command(out, errw io.Writer, args []string) int {
 
 	switch action {
 	case "on":
-		s.AutoUpdate = stateOn
+		s.Updates = stateOn
 	case "off":
-		s.AutoUpdate = stateOff
+		s.Updates = stateOff
 		s.LatestSeen = "" // drop any pending notice along with the setting
 	}
-	if action != "status" {
+	if action != "" {
 		if err := c.save(s); err != nil {
 			return fatal("error: %v", err)
 		}
@@ -80,16 +78,16 @@ func (c *Checker) Command(out, errw io.Writer, args []string) int {
 	if err != nil {
 		return fatal("error: %v", err)
 	}
-	switch s.AutoUpdate {
+	switch s.Updates {
 	case stateOn:
-		_, _ = fmt.Fprintln(out, "auto-update: on")
+		_, _ = fmt.Fprintf(out, "%s: on\n", c.commandName())
 	case stateOff:
-		_, _ = fmt.Fprintln(out, "auto-update: off")
+		_, _ = fmt.Fprintf(out, "%s: off\n", c.commandName())
 	default:
-		_, _ = fmt.Fprintln(out, "auto-update: not set (nothing is checked until you are asked, or set it here)")
+		_, _ = fmt.Fprintf(out, "%s: not set (nothing is checked until you are asked, or set it here)\n", c.commandName())
 	}
 	_, _ = fmt.Fprintf(out, "settings file: %s\n", path)
-	if s.AutoUpdate == stateOn && !s.LastChecked.IsZero() {
+	if s.Updates == stateOn && !s.LastChecked.IsZero() {
 		_, _ = fmt.Fprintf(out, "last checked: %s (latest release: %s)\n",
 			s.LastChecked.Local().Format(time.RFC1123), s.LatestSeen)
 	}

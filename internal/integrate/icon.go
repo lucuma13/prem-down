@@ -15,8 +15,6 @@
 // template TIFF (workflowCustomImageTemplate.tiff) and writes it into the Quick
 // Action bundle's Resources, where NSIconName references it — so the Finder
 // right-click entry shows the prem-down glyph, tinted to match the OS.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
 package integrate
 

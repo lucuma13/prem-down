@@ -6,10 +6,8 @@
 //
 // user32 is on Windows' KnownDLLs list, so it always resolves from System32 and
 // NewLazyDLL cannot be DLL-planted here.
-//
-// Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
-package updatechecker
+package updates
 
 import (
 	"io"
