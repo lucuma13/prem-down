@@ -140,6 +140,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw '.prodset context-menu DropTarget CLSID missing after install' }
           reg query 'HKLM\SOFTWARE\Classes\CLSID\{4D9F2A18-7C3B-4E6A-B1F5-2A8C6D0E9F34}\LocalServer32'
           if ($LASTEXITCODE -ne 0) { throw 'COM LocalServer registration missing after install' }
+      - name: Downgrade real projects with the installed binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="/c/Program Files/prem-down/prem-down.exe"
+          work="$RUNNER_TEMP/probe"
+          mkdir -p "$work/MyProduction"
+          # A 2026 project: the case the tool exists for, where the conversion
+          # re-inserts the fields 2026 drops rather than only re-gating a version.
+          cp internal/premdown/testdata/fixture_ppro26.prproj "$work/lone.prproj"
+          cp internal/premdown/testdata/fixture_ppro26.prproj "$work/MyProduction/a.prproj"
+          cp internal/premdown/testdata/fixture_prproduction.prodset "$work/MyProduction/MyProduction.prodset"
+
+          "$exe" "$work/lone.prproj"
+          [ -s "$work/lone_downgraded.prproj" ] || { echo 'no downgraded project written'; exit 1; }
+
+          # A Production is reached through its .prodset and mirrored whole.
+          "$exe" "$work/MyProduction/MyProduction.prodset"
+          [ -s "$work/MyProduction_downgraded/a.prproj" ] || { echo 'Production project not mirrored'; exit 1; }
+          [ -s "$work/MyProduction_downgraded/MyProduction_downgraded.prodset" ] || { echo 'Production settings not downgraded'; exit 1; }
+
+          # And the result must be a real downgrade, not just a file that exists:
+          # read the <Project> version back out and check it actually dropped.
+          ver() { gzip -dc "$1" | grep -o '<Project [^>]*Version="[0-9]*"' | head -1 | grep -o '[0-9]*"$' | tr -d '"'; }
+          src_v=$(ver "$work/lone.prproj")
+          out_v=$(ver "$work/lone_downgraded.prproj")
+          [ -n "$out_v" ] || { echo 'could not read the downgraded project version'; exit 1; }
+          [ "$out_v" -lt "$src_v" ] || { echo "version not lowered ($src_v -> $out_v)"; exit 1; }
+          echo "downgraded project version $src_v -> $out_v"
       - name: Smoke-test COM server activation (-Embedding)
         shell: pwsh
         run: |
