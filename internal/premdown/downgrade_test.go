@@ -247,6 +247,39 @@ func TestReconstructPositionalClassesPropagatesParseError(t *testing.T) {
 	}
 }
 
+// Once one instance is malformed the whole file is refused, so the instances
+// after it are left exactly as they were rather than half-rebuilt.
+func TestReconstructPositionalClassesStopsAtTheFirstBadInstance(t *testing.T) {
+	bad := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<LowerBound>1</Wrong>
+</VideoComponentParam>
+` + sparseVideoComponentParam
+	out, stats, err := reconstructPositionalClasses(bad)
+	if err == nil {
+		t.Fatal("expected a parse error for a malformed instance, got nil")
+	}
+	if out != "" || stats != nil {
+		t.Errorf("a refused file must yield no document: %q, %v", out, stats)
+	}
+}
+
+// Self-closing elements carry no content to complete, so they are stepped over
+// rather than rebuilt — and the instance around them is still byte-identical
+// apart from the fields actually inserted.
+func TestRebuildSkipsSelfClosingChildren(t *testing.T) {
+	in := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<ParameterID/>
+	<StartKeyframe>0,true,0,0,0,0,0,0</StartKeyframe>
+</VideoComponentParam>`
+	out, stats := mustReconstruct(t, in)
+	if !strings.Contains(out, "<ParameterID/>") {
+		t.Errorf("the self-closing child should be reproduced as it was:\n%s", out)
+	}
+	if len(stats) != 2 {
+		t.Errorf("both bounds should still be inserted, got %v", stats)
+	}
+}
+
 // --------------------------------------------------------------------------
 // downgrade.go — the release map, <Project> version stamping, and path helpers.
 // --------------------------------------------------------------------------
@@ -489,8 +522,16 @@ func TestDowngradeRejectsTargetNotBelowSource(t *testing.T) {
 	}
 	out := filepath.Join(dir, "out.prproj")
 	// Equal to the source is refused just like above it.
-	if err := silent().Downgrade(src, out, 42, false); err == nil {
+	err := silent().Downgrade(src, out, 42, false)
+	if err == nil {
 		t.Fatal("expected an error for a target not below the source, got nil")
+	}
+	// On a lone file this is user error, so the message has to name both
+	// versions and point at the flag that caused it.
+	for _, want := range []string{"42", "--to"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
 	}
 	if _, err := os.Stat(out); err == nil {
 		t.Error("no output file should be written when the target is rejected")
@@ -594,6 +635,95 @@ func TestDowngradeWriteError(t *testing.T) {
 	dst := filepath.Join(dir, "no-such-dir", "out.prproj")
 	if err := silent().Downgrade(src, dst, 41, false); err == nil {
 		t.Fatal("expected a write error for an unwritable destination, got nil")
+	}
+}
+
+// Everything that can go wrong between reading a project and writing it is
+// returned rather than fatal, and leaves no output behind: a document that
+// carries the Premiere marker but no project tag, one whose classes cannot be
+// parsed, and one carrying two project tags (where stamping a version would
+// have to guess which one Premiere reads).
+func TestDowngradeRefusesMalformedProjects(t *testing.T) {
+	cases := map[string]string{
+		"no project tag": `<PremiereData Version="3">
+</PremiereData>`,
+		"malformed class instance": `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="45"></Project>
+<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<LowerBound>1</Wrong>
+</VideoComponentParam>
+</PremiereData>`,
+		"two project tags": `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="45"></Project>
+<Project ObjectID="1" ClassID="y" Version="45"></Project>
+</PremiereData>`,
+	}
+	for name, xml := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := writeFile(t, filepath.Join(dir, "in"+PrprojExt), xml)
+			out := filepath.Join(dir, "out"+PrprojExt)
+			if err := silent().Downgrade(src, out, 43, false); err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if _, err := os.Stat(out); err == nil {
+				t.Error("no output file should be written for a refused project")
+			}
+		})
+	}
+}
+
+// verifyDowngraded is the gate between the finished document and the disk. It
+// is driven directly here because a document that fails it is by construction
+// one the conversion above it was supposed to make impossible — the point of
+// the check is that a future change which breaks that is refused, not written.
+func TestVerifyDowngradedRefusesABadConversion(t *testing.T) {
+	const stamped = `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="43">
+</Project>
+</PremiereData>`
+
+	cases := []struct {
+		name       string
+		xml        string
+		reinserted bool
+		want       string
+	}{
+		{"no version to read back", "<PremiereData/>", false, "verify:"},
+		{
+			"stamped with the wrong version",
+			strings.Replace(stamped, `Version="43"`, `Version="41"`, 1), false, "want 43",
+		},
+		{
+			"output no longer parses",
+			stamped + "\n<VideoComponentParam ObjectID=\"1\" ClassID=\"x\" Version=\"10\">\n\t<LowerBound>1</Wrong>\n</VideoComponentParam>",
+			false, "re-parse",
+		},
+		// A required field still missing after a conversion that was supposed to
+		// re-insert them: a second pass would change the document, so the first
+		// one was not a fixpoint.
+		{"fields still missing", stamped + "\n" + sparseVideoComponentParam, true, "fixpoint"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := verifyDowngraded(tc.xml, 43, tc.reinserted)
+			if err == nil {
+				t.Fatal("expected a refusal, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should mention %q", err, tc.want)
+			}
+		})
+	}
+	// The shape it exists to let through: stamped at the target, and every
+	// required field already present.
+	complete := stamped + `
+<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<LowerBound>false</LowerBound>
+	<UpperBound>true</UpperBound>
+</VideoComponentParam>`
+	if err := verifyDowngraded(complete, 43, true); err != nil {
+		t.Errorf("a correct conversion must pass: %v", err)
 	}
 }
 

@@ -152,6 +152,94 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	}
 }
 
+// The Quick Action lives under the user's home directory, so a run that cannot
+// work out where that is — or cannot create the bundle there — has to say so
+// and exit non-zero. Both directions of the subcommand report it; neither
+// claims to have installed or removed anything.
+func TestIntegrateReportsAFailureToWriteTheBundle(t *testing.T) {
+	// Stubbed for the same reason as everywhere else in this file: the real
+	// implementations write the per-user `pbs` domain, which cfprefsd resolves
+	// by UID and so ignores the $HOME this test sets.
+	origEnable, origDisable := enableServiceMenu, disableServiceMenu
+	enableServiceMenu = func() error { return nil }
+	disableServiceMenu = func() error { return nil }
+	t.Cleanup(func() { enableServiceMenu, disableServiceMenu = origEnable, origDisable })
+
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, home string }{
+		{"no home directory", ""},
+		{"home is not a directory", blocker},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", tc.home)
+			for _, args := range [][]string{nil, {"--remove"}} {
+				var out, errw strings.Builder
+				if code := Run(&out, &errw, args); code != 1 {
+					t.Errorf("%v: want exit 1, got %d (out %q)", args, code, out.String())
+				}
+				if !strings.Contains(errw.String(), "error:") {
+					t.Errorf("%v: failure not reported:\n%s", args, errw.String())
+				}
+				if out.String() != "" {
+					t.Errorf("%v: nothing should be announced on failure: %q", args, out.String())
+				}
+			}
+		})
+	}
+}
+
+// A bundle that already exists but cannot be written into — the shape an
+// install left behind by a privileged installer takes for the user's own later
+// run — fails on the file it could not write instead of leaving a half-built
+// Quick Action that Finder would try to load.
+func TestInstallIntegrationReportsAWriteFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission failures cannot be provoked")
+	}
+	for _, locked := range []string{"Contents", filepath.Join("Contents", "Resources")} {
+		t.Run(locked, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			origEnable := enableServiceMenu
+			enableServiceMenu = func() error { return nil }
+			t.Cleanup(func() { enableServiceMenu = origEnable })
+
+			bundle := filepath.Join(home, "Library", "Services", quickActionMenuTitle+".workflow")
+			if err := os.MkdirAll(filepath.Join(bundle, "Contents", "Resources"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			// r-x: the directories are still there to be found, but nothing new
+			// can be created in them.
+			dir := filepath.Join(bundle, locked)
+			if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: the point of the test is a directory that can be traversed but not written
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: restoring the directory so the temp dir can be removed
+
+			if err := installIntegration(); err == nil {
+				t.Fatal("expected an error when the bundle cannot be written")
+			}
+		})
+	}
+}
+
+// MaybeRunCOMServer is the Windows Drop Target activation hook. On macOS the
+// Quick Action invokes prem-down directly, so it must never claim a run —
+// whatever the arguments look like.
+func TestMaybeRunCOMServerNeverClaimsARunOnMacOS(t *testing.T) {
+	for _, args := range [][]string{nil, {"-Embedding"}, {"a.prproj"}} {
+		if MaybeRunCOMServer(args, func([]string) (string, bool) {
+			t.Error("the COM downgrader must not be called on macOS")
+			return "", false
+		}) {
+			t.Errorf("MaybeRunCOMServer(%v) should be a no-op on macOS", args)
+		}
+	}
+}
+
 // removeIntegration must reverse the Services-database entry, not just delete
 // the bundle: it has to invoke the disable seam so no stale NSServicesStatus
 // record lingers after uninstall.

@@ -7,10 +7,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// requirePermissionEnforcement skips the tests that provoke a failure by taking
+// a directory's permissions away. Windows does not enforce the POSIX mode bits
+// Go sets, and root ignores them, so on those hosts the operation under test
+// would simply succeed and the assertions would be meaningless.
+func requirePermissionEnforcement(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce POSIX directory permissions")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission failures cannot be provoked")
+	}
+}
 
 // A .prodset as Premiere 2026 writes one: minified JSON, keys sorted, with an
 // XML document embedded as a JSON string. The embedded blob is the part a
@@ -274,6 +289,118 @@ func TestDowngradeProdsetVerboseNarratesBothStamps(t *testing.T) {
 	}
 }
 
+// Every way one settings file can fail is returned, never fatal, so a
+// Production walk reports the file and keeps going.
+func TestDowngradeProdsetPropagatesFailures(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name    string
+		content string // "" => no file at all
+		target  int
+		want    string // substring the diagnostic must carry ("" => any error)
+	}{
+		{"unreadable source", "", 43, ""},
+		{"truncated UTF-16 document", utf16le(`{"mProjectVersion":45}`)[:43], 43, "mid-character"},
+		{"target not below the source", `{"mProjectVersion":43}`, 43, "not below"},
+		{"target predates Productions", `{"mProjectVersion":45}`, 30, "Productions"},
+		{
+			"duplicated compatibility floor",
+			`{"mMinCompatibleProjectVersion":45,"mMinCompatibleProjectVersion":45,"mProjectVersion":45}`,
+			43, "found 2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := filepath.Join(dir, tc.name+ProdsetExt)
+			if tc.content != "" {
+				writeFile(t, src, tc.content)
+			}
+			dst := filepath.Join(dir, tc.name+"-out"+ProdsetExt)
+			err := silent().downgradeProdset(src, dst, tc.target, false)
+			if err == nil {
+				t.Fatalf("expected an error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should mention %q", err, tc.want)
+			}
+			if _, statErr := os.Stat(dst); statErr == nil {
+				t.Error("nothing should be written when the rewrite fails")
+			}
+		})
+	}
+}
+
+// verifyProdset is the last gate before the settings are written: it re-reads
+// what we are about to put on disk and refuses anything a Premiere could not
+// open. Driven directly, since a document that reaches it broken is by
+// definition one the rewrite above was supposed to make impossible.
+func TestVerifyProdsetRefusesAnUnopenableResult(t *testing.T) {
+	truncated := []byte(utf16le(`{"mProjectVersion":43}`))
+	cases := []struct {
+		name string
+		out  []byte
+		want string
+	}{
+		{"does not decode", truncated[:len(truncated)-1], "re-decode"},
+		{"does not parse", []byte("{not json"), "re-parse"},
+		{"wrong version stamped", []byte(`{"mProjectVersion":45}`), "want 43"},
+		{
+			"compatibility floor above the target",
+			[]byte(`{"mMinCompatibleProjectVersion":45,"mProjectVersion":43}`),
+			"above the target",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := verifyProdset(tc.out, 43)
+			if err == nil {
+				t.Fatal("expected a refusal, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should mention %q", err, tc.want)
+			}
+		})
+	}
+	// The shape it exists to let through.
+	if err := verifyProdset([]byte(`{"mMinCompatibleProjectVersion":40,"mProjectVersion":43}`), 43); err != nil {
+		t.Errorf("a correctly downgraded document must pass: %v", err)
+	}
+}
+
+// copyFile is what keeps a Production's media and sidecars intact, so its
+// failures have to surface: an unreadable source, a destination name claimed
+// since it was picked, and a copy that dies mid-way — the last leaving no
+// half-written file next to the good ones.
+func TestCopyFileFailures(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, filepath.Join(dir, "src.prin"), prinSidecar)
+
+	if err := copyFile(filepath.Join(dir, "absent"), filepath.Join(dir, "a"), 0o644); err == nil {
+		t.Error("expected an error for an unreadable source")
+	}
+
+	taken := writeFile(t, filepath.Join(dir, "taken.prin"), "do not overwrite me")
+	if err := copyFile(src, taken, 0o644); err == nil {
+		t.Error("expected a refusal to overwrite an existing destination")
+	}
+	if got := readFile(t, taken); got != "do not overwrite me" {
+		t.Errorf("the existing file was overwritten: %q", got)
+	}
+
+	// A directory opens but cannot be read, which fails the copy itself rather
+	// than the open — the path that has to clean up after itself.
+	if runtime.GOOS == "windows" {
+		t.Skip("reading a directory handle is not an error on Windows")
+	}
+	partial := filepath.Join(dir, "partial")
+	if err := copyFile(dir, partial, 0o644); err == nil {
+		t.Error("expected an error when the source cannot be read")
+	}
+	if _, err := os.Stat(partial); err == nil {
+		t.Error("a failed copy must not leave its partial output behind")
+	}
+}
+
 func TestParseProdsetRejectsNonProdset(t *testing.T) {
 	for name, content := range map[string]string{
 		"not JSON":              "<PremiereData Version=\"3\">",
@@ -428,6 +555,9 @@ func TestPlainProjectStillAllowsPreProductionTargets(t *testing.T) {
 
 func TestFindProdsetRequiresExactlyOne(t *testing.T) {
 	dir := t.TempDir()
+	if _, err := findProdset(filepath.Join(dir, "absent")); err == nil {
+		t.Error("a folder that cannot be listed is not a Production")
+	}
 	if _, err := findProdset(dir); err == nil {
 		t.Error("a folder with no settings file is not a Production")
 	}
@@ -473,6 +603,152 @@ func TestDowngradeProductionReportsPartialFailure(t *testing.T) {
 	// The good files still made it, so the user can salvage the run.
 	if _, statErr := os.Stat(filepath.Join(dst, "Untitled"+PrprojExt)); statErr != nil {
 		t.Errorf("the other projects should still have been written: %v", statErr)
+	}
+}
+
+// A folder that is not a Production at all is refused before anything is
+// created, and so is an output folder that already exists — the mirror must
+// never be merged into something already on disk.
+func TestDowngradeProductionRefusesBadEndpoints(t *testing.T) {
+	empty := t.TempDir()
+	if err := silent().DowngradeProduction(empty, empty+"_downgraded", 43, false); err == nil {
+		t.Error("a folder with no settings file is not a Production")
+	}
+
+	src := newProduction(t, "Taken")
+	dst := src + "_downgraded"
+	if err := os.Mkdir(dst, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := silent().DowngradeProduction(src, dst, 43, false); err == nil {
+		t.Error("an existing output folder must not be written into")
+	}
+	if entries, err := os.ReadDir(dst); err != nil || len(entries) != 0 {
+		t.Errorf("the existing folder should be untouched, got %d entries (err %v)", len(entries), err)
+	}
+}
+
+// The target is resolved once, from the settings file, so a --to at or above
+// the Production's own version is refused there — before the output folder
+// exists, and without each project getting a chance to pick its own answer.
+func TestDowngradeProductionRefusesTargetNotBelowTheSettings(t *testing.T) {
+	src := newProduction(t, "NotBelow")
+	dst := src + "_downgraded"
+	err := silent().DowngradeProduction(src, dst, 45, false) // the .prodset is 45
+	if err == nil {
+		t.Fatal("expected a refusal for a target at the Production's own version")
+	}
+	if !strings.Contains(err.Error(), "not below") {
+		t.Errorf("unhelpful error: %v", err)
+	}
+	if _, statErr := os.Stat(dst); statErr == nil {
+		t.Error("nothing should have been written for a refused target")
+	}
+}
+
+// Only the top-level settings file is renamed to match the output folder. A
+// second .prodset further down is still downgraded in place, and a broken one
+// is reported like any other file rather than aborting the mirror.
+func TestDowngradeProductionReportsANestedProdset(t *testing.T) {
+	src := newProduction(t, "Nested")
+	writeFile(t, filepath.Join(src, "subfolder", "broken"+ProdsetExt), "{not json")
+	dst := src + "_downgraded"
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	err := d.DowngradeProduction(src, dst, 43, false)
+	if err == nil {
+		t.Fatal("a Production holding an unreadable settings file should report failure")
+	}
+	if !strings.Contains(errBuf.String(), "broken"+ProdsetExt) {
+		t.Errorf("the failing file should be named:\n%s", errBuf.String())
+	}
+	// The rest of the Production still made it.
+	if _, statErr := os.Stat(filepath.Join(dst, "Untitled"+PrprojExt)); statErr != nil {
+		t.Errorf("the other files should still have been written: %v", statErr)
+	}
+}
+
+// Directory permissions are the one thing that makes an individual entry of the
+// mirror fail while everything around it succeeds, which is exactly the
+// keep-going contract. A source folder the copy cannot be written into fails
+// every kind of entry it holds — a plain file, a subfolder, a symlink — and a
+// source folder that cannot be read fails at the walk. All of it is reported
+// per-file, and the rest of the Production is still mirrored.
+func TestDowngradeProductionReportsUnwritableEntries(t *testing.T) {
+	requirePermissionEnforcement(t)
+	src := newProduction(t, "Perms")
+	dst := src + "_downgraded"
+
+	// r-x: the walk can list it, so its contents are attempted, but nothing can
+	// be created inside the copy the mirror makes of it.
+	readOnly := filepath.Join(src, "read-only")
+	writeFile(t, filepath.Join(readOnly, "media.mov"), "frames")
+	writeFile(t, filepath.Join(readOnly, "inner", "clip.mov"), "more frames")
+	// Already below the target, so this one is copied through rather than
+	// converted — the other way a file in there reaches copyFile.
+	writeFile(t, filepath.Join(readOnly, "old"+PrprojExt),
+		strings.Replace(prodProject, `Version="45"`, `Version="41"`, 1))
+	if err := os.Symlink("media.mov", filepath.Join(readOnly, "link.mov")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// Unreadable outright: the walk itself fails on this one.
+	unreadable := filepath.Join(src, "unreadable")
+	writeFile(t, filepath.Join(unreadable, "media.mov"), "frames")
+
+	for _, dir := range []string{readOnly, unreadable} {
+		mode := os.FileMode(0o500)
+		if dir == unreadable {
+			mode = 0o000
+		}
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		// Both the source folders and the copies made of them inherit the mode,
+		// so open them back up or the temp dir cannot be cleaned up.
+		mirrored := filepath.Join(dst, filepath.Base(dir))
+		t.Cleanup(func() {
+			_ = os.Chmod(dir, 0o700)      //nolint:gosec // G302: restoring a directory this test made unwritable, so it can be removed
+			_ = os.Chmod(mirrored, 0o700) //nolint:gosec // G302: as above, for the copy the mirror made of it
+		})
+	}
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	if err := d.DowngradeProduction(src, dst, 43, false); err == nil {
+		t.Fatal("entries that could not be written should report failure")
+	}
+	for _, want := range []string{"media.mov", "inner", "link.mov", "old" + PrprojExt, "unreadable"} {
+		if !strings.Contains(errBuf.String(), want) {
+			t.Errorf("want %q reported as a failure:\n%s", want, errBuf.String())
+		}
+	}
+	// Everything outside those folders was still mirrored.
+	if _, err := os.Stat(filepath.Join(dst, "Untitled"+PrprojExt)); err != nil {
+		t.Errorf("the writable part of the Production should still be mirrored: %v", err)
+	}
+}
+
+// Verbose narrates the whole mirror: the renamed settings file, each project
+// written, and the projects that were already old enough to copy through.
+func TestDowngradeProductionVerbose(t *testing.T) {
+	src := newProduction(t, "Chatty")
+	writeFile(t, filepath.Join(src, "old"+PrprojExt),
+		strings.Replace(prodProject, `Version="45"`, `Version="41"`, 1))
+
+	var out bytes.Buffer
+	d := &Downgrader{Out: &out}
+	if err := d.DowngradeProduction(src, src+"_downgraded", 43, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"renamed settings file Chatty" + ProdsetExt,
+		"wrote Chatty_downgraded" + ProdsetExt,
+		"already version 41, copied unchanged",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("verbose output missing %q:\n%s", want, out.String())
+		}
 	}
 }
 

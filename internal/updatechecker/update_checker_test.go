@@ -77,6 +77,133 @@ func TestNewerAndParseVersion(t *testing.T) {
 	}
 }
 
+// Comparable is the test the host applies to its own version string before
+// reporting it, so it has to agree with the comparison Newer will make: exactly
+// the versions Comparable accepts are the ones that can produce a notice.
+func TestComparable(t *testing.T) {
+	for _, v := range []string{"1.2.3", "v1.2.3", "1.2", "0"} {
+		if !Comparable(v) {
+			t.Errorf("Comparable(%q) = false, want true", v)
+		}
+	}
+	for _, v := range []string{"", "dev", "v0.1-3-gabc123-dirty", "1.2.3+dirty", "nightly"} {
+		if Comparable(v) {
+			t.Errorf("Comparable(%q) = true, want false", v)
+		}
+		// Nothing Comparable rejects may ever produce a notice.
+		if Newer(v, "99.0.0") || Newer("1.0.0", v) {
+			t.Errorf("%q is not comparable but Newer used it anyway", v)
+		}
+	}
+}
+
+// Without an override the request goes to GitHub's latest-release API for Repo,
+// which is the one network endpoint this package ever contacts.
+func TestEndpointDefaultsToGitHub(t *testing.T) {
+	c := New("owner/repo", "my-tool", "1.0.0")
+	if got, want := c.endpoint(), "https://api.github.com/repos/owner/repo/releases/latest"; got != want {
+		t.Errorf("endpoint() = %q, want %q", got, want)
+	}
+	c.Endpoint = "http://localhost:1234"
+	if got := c.endpoint(); got != "http://localhost:1234" {
+		t.Errorf("an override should win, got %q", got)
+	}
+}
+
+// An endpoint that cannot be turned into a request fails before anything is
+// sent, and like every other request failure it is returned, never fatal.
+func TestLatestRejectsAnUnusableEndpoint(t *testing.T) {
+	c := New("owner/repo", "my-tool", "1.0.0")
+	c.Endpoint = "http://host\x7f/releases" // a control character url.Parse refuses
+	if _, err := c.latest(); err == nil {
+		t.Error("want an error for an unparsable endpoint, got nil")
+	}
+}
+
+// With no ConfigPath override the settings live in the per-user config
+// directory under the product's own folder; a host that has no such directory
+// is reported rather than guessed at, and every caller of configPath passes
+// that failure on instead of silently reading or writing somewhere else.
+func TestConfigPathDefaultsToTheUserConfigDir(t *testing.T) {
+	c := New("owner/repo", "my-tool", "1.0.0")
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir()) // Windows' equivalent
+	t.Setenv("XDG_CONFIG_HOME", "")  // Unix: fall back to $HOME/.config
+	path, err := c.configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if want := filepath.Join("my-tool", "config.json"); !strings.HasSuffix(path, want) {
+		t.Errorf("configPath() = %q, want it to end in %q", path, want)
+	}
+
+	// No config directory at all: an error, and no fallback path.
+	t.Setenv("HOME", "")
+	t.Setenv("AppData", "")
+	if _, err := c.configPath(); err == nil {
+		t.Fatal("want an error when there is no user config directory, got nil")
+	}
+	if _, err := c.load(); err == nil {
+		t.Error("load should pass the configPath failure on")
+	}
+	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+		t.Error("save should pass the configPath failure on")
+	}
+	var o, e bytes.Buffer
+	if code := c.Command(&o, &e, []string{"status"}); code != 1 || !strings.Contains(e.String(), "error:") {
+		t.Errorf("the subcommand should report it: code=%d err=%q", code, e.String())
+	}
+}
+
+// Every step of the atomic save is reported rather than half-done: no settings
+// directory that can be created, no temp file that can be written, and no
+// rename onto the target. The last one must also leave no temp file behind.
+func TestSaveReportsEveryFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	// The settings directory cannot be created: a regular file sits where it
+	// would go.
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := New("owner/repo", "my-tool", "1.0.0")
+	c.ConfigPath = filepath.Join(blocker, "config.json")
+	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+		t.Error("want an error when the settings directory cannot be created")
+	}
+
+	// The temp file cannot be written: its exact name is already a directory.
+	c.ConfigPath = filepath.Join(dir, "taken", "config.json")
+	tmp := fmt.Sprintf("%s.tmp.%d", c.ConfigPath, os.Getpid())
+	if err := os.MkdirAll(tmp, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+		t.Error("want an error when the temp file cannot be written")
+	}
+
+	// The rename cannot happen: the target is a non-empty directory. The
+	// previous settings (such as they are) survive, and no temp file is left.
+	c.ConfigPath = filepath.Join(dir, "occupied")
+	if err := os.MkdirAll(filepath.Join(c.ConfigPath, "child"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.save(settings{AutoUpdate: stateOn}); err == nil {
+		t.Error("want an error when the settings cannot be renamed into place")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Errorf("a failed rename left a temp file behind: %s", e.Name())
+		}
+	}
+}
+
 func TestUpgradeHintForPath(t *testing.T) {
 	c := New("lucuma13/prem-down", "prem-down", "1.0.0")
 	cases := []struct{ exe, wantVerb, wantTarget string }{
@@ -125,6 +252,14 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 	if _, err := c.load(); err == nil {
 		t.Error("malformed settings should return an error")
+	}
+
+	// Only a missing file reads as "never asked"; a file that exists but cannot
+	// be read is an error, so a settings file the user cannot read never looks
+	// like consent to ask again.
+	c.ConfigPath = t.TempDir()
+	if _, err := c.load(); err == nil {
+		t.Error("unreadable settings should return an error")
 	}
 }
 
@@ -345,6 +480,56 @@ func TestNotifyPassesStreamsToAsk(t *testing.T) {
 	}
 }
 
+// The wording of the question and the gap between requests are the two things a
+// host may reasonably want to phrase or pace itself; both defaults give way to
+// the field.
+func TestQuestionAndIntervalOverrides(t *testing.T) {
+	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.Question = "Look for updates?"
+	c.Interval = time.Hour
+	var asked string
+	c.Ask = func(question string, _ io.Reader, _ io.Writer) bool { asked = question; return true }
+
+	notify(c, true)
+	if asked != c.Question {
+		t.Errorf("want the configured question, got %q", asked)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("want one request on opting in, got %d", hits.Load())
+	}
+	// Inside the configured hour: still throttled. Past it: checked again.
+	c.Now = func() time.Time { return time.Now().Add(30 * time.Minute) }
+	notify(c, false)
+	if hits.Load() != 1 {
+		t.Errorf("want the configured interval to throttle, got %d requests", hits.Load())
+	}
+	c.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	notify(c, false)
+	if hits.Load() != 2 {
+		t.Errorf("want a request once the configured interval has passed, got %d", hits.Load())
+	}
+}
+
+// If the answer cannot be persisted, the run stops there: checking anyway would
+// contact GitHub on a consent that will be asked for again next run.
+func TestNotifyStopsWhenTheAnswerCannotBeSaved(t *testing.T) {
+	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	// The save writes through this temp name; make it a directory so it fails
+	// while the (absent) settings file still reads as "never asked".
+	if err := os.MkdirAll(fmt.Sprintf("%s.tmp.%d", c.ConfigPath, os.Getpid()), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	c.Ask = func(string, io.Reader, io.Writer) bool { return true }
+
+	if got := notify(c, true); got != "" {
+		t.Errorf("want no output, got %q", got)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("want no request when the consent could not be stored, got %d", hits.Load())
+	}
+}
+
 // --------------------------------------------------------------------------
 // Command — the terminal way in and out.
 // --------------------------------------------------------------------------
@@ -392,6 +577,53 @@ func TestCommand(t *testing.T) {
 	}
 	if code, _, errw := run("maybe"); code != 1 || !strings.Contains(errw, "unknown action") {
 		t.Errorf("unknown action: code=%d err=%q", code, errw)
+	}
+}
+
+// The host names the subcommand, so the help it prints has to use that name
+// rather than this package's default, or it would tell the user to type
+// something their program does not accept.
+func TestCommandNameOverride(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.CommandName = "updates"
+	var o, e bytes.Buffer
+	if code := c.Command(&o, &e, []string{"--help"}); code != 0 {
+		t.Fatalf("--help: code=%d", code)
+	}
+	if !strings.Contains(o.String(), "my-tool updates") {
+		t.Errorf("help should use the configured command name:\n%s", o.String())
+	}
+}
+
+// Turning the check on when the setting cannot be stored has to fail loudly:
+// the user asked for a change and would otherwise be told it took effect.
+func TestCommandReportsAFailedSave(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	if err := os.MkdirAll(fmt.Sprintf("%s.tmp.%d", c.ConfigPath, os.Getpid()), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var o, e bytes.Buffer
+	if code := c.Command(&o, &e, []string{"on"}); code != 1 || !strings.Contains(e.String(), "error:") {
+		t.Errorf("want a reported error, code=%d out=%q err=%q", code, o.String(), e.String())
+	}
+}
+
+// Once a check has actually run, status reports when it happened and what it
+// found — the two facts that explain why (or why not) a notice is appearing.
+func TestCommandStatusReportsTheLastCheck(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	checked := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if err := c.save(settings{AutoUpdate: stateOn, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	var o, e bytes.Buffer
+	if code := c.Command(&o, &e, []string{"status"}); code != 0 {
+		t.Fatalf("status: code=%d err=%q", code, e.String())
+	}
+	for _, want := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0"} {
+		if !strings.Contains(o.String(), want) {
+			t.Errorf("status output missing %q:\n%s", want, o.String())
+		}
 	}
 }
 

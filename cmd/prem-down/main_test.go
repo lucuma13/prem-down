@@ -476,6 +476,69 @@ func TestRunDispatchesAutoUpdate(t *testing.T) {
 	}
 }
 
+// A build with no update checker wired in still has to answer the subcommand,
+// and saying so is better than reporting "auto-update" as a missing project
+// file — which is what falling through to the flag parser would produce.
+func TestRunAutoUpdateWithoutAChecker(t *testing.T) {
+	c := newTestCLI(t, "")
+	c.updates = nil
+	if code := c.run([]string{"auto-update", "status"}); code != 1 {
+		t.Fatalf("want exit 1, got code=%d", code)
+	}
+	if !strings.Contains(c.err.String(), "not available") {
+		t.Errorf("missing diagnostic:\n%s", c.err)
+	}
+}
+
+// An unknown --to release fails before any file is touched, so a typo cannot
+// convert half a batch to something the user did not ask for.
+func TestRunRejectsAnUnknownRelease(t *testing.T) {
+	src := writeProject(t, t.TempDir(), "in.prproj")
+	c := newTestCLI(t, "")
+	if code := c.run([]string{"--to=2027", src}); code != 1 {
+		t.Fatalf("an unknown release should fatal 1, got code=%d", code)
+	}
+	if !strings.Contains(c.err.String(), "unknown release") {
+		t.Errorf("missing diagnostic:\n%s", c.err)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(src, ".prproj") + "_downgraded.prproj"); err == nil {
+		t.Error("nothing should have been converted")
+	}
+}
+
+// newCLI is the only place the process streams are reached for, and the update
+// checker has to be wired in there or the feature is silently absent from the
+// real binary while every test still passes.
+func TestNewCLIWiresTheProcessStreams(t *testing.T) {
+	c := newCLI()
+	if c.out != os.Stdout || c.err != os.Stderr || c.in != os.Stdin {
+		t.Error("newCLI should wire the real process streams")
+	}
+	if c.gui {
+		t.Error("a plain invocation is not a file-manager run")
+	}
+	if c.updates == nil {
+		t.Fatal("newCLI should wire the update checker")
+	}
+	if c.updates.Version != version || c.updates.Repo != githubRepo {
+		t.Errorf("the checker should carry this build's identity, got %+v", c.updates)
+	}
+}
+
+// comDowngrade is the Windows COM handler's way in: it runs a selection through
+// the same cli the tests drive and folds the result into dialog text, because
+// that activation has no console to print to. An empty selection exercises the
+// wiring without converting anything.
+func TestComDowngradeFoldsARunIntoDialogText(t *testing.T) {
+	summary, failed := comDowngrade(nil)
+	if !failed {
+		t.Error("a selection with nothing to convert is not a success")
+	}
+	if !strings.Contains(summary, "Usage: prem-down") {
+		t.Errorf("want the run's own output as the dialog text, got %q", summary)
+	}
+}
+
 // The question belongs to the context-menu surfaces, which is what --gui marks.
 // A terminal run converts and says nothing: that user has the subcommand.
 func TestRunAsksAboutUpdatesOnlyFromTheFileManager(t *testing.T) {
