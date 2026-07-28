@@ -433,3 +433,96 @@ func TestNotifyDoesNothingForUnComparableVersions(t *testing.T) {
 		})
 	}
 }
+
+// CheckNow answers the host's "is there a newer release that might handle this?"
+// It is opt-in only and never asks, so an un-answered or declined setting is
+// silence and no request.
+func TestCheckNowRequiresOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state string
+	}{
+		{"never asked", stateUnset},
+		{"declined", stateOff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
+			c.Ask = func(string, io.Reader, io.Writer) bool {
+				t.Error("CheckNow must never raise the question")
+				return true
+			}
+			if tc.state != stateUnset {
+				if err := c.save(settings{AutoUpdate: tc.state}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if u := c.CheckNow(); u != nil {
+				t.Errorf("want no upgrade without opt-in, got %+v", u)
+			}
+			if hits.Load() != 0 {
+				t.Errorf("want no request without opt-in, got %d", hits.Load())
+			}
+		})
+	}
+}
+
+// Opted in, CheckNow reports the upgrade and the channel-specific way to take
+// it, and ignores the throttle: the weekly gap serves the routine notice, but
+// this caller is holding a file it could not identify, and a cached "nothing
+// new" from six days ago is the wrong answer to give it.
+func TestCheckNowIgnoresTheThrottle(t *testing.T) {
+	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
+	if err := c.save(settings{AutoUpdate: stateOn, LastChecked: c.now(), LatestSeen: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	u := c.CheckNow()
+	if u == nil {
+		t.Fatal("want an upgrade reported, got nil")
+	}
+	if u.Version != "v1.1.0" || u.Verb == "" || u.Target == "" {
+		t.Errorf("incomplete upgrade: %+v", u)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("want a fresh request despite the recent check, got %d", hits.Load())
+	}
+	if s, _ := c.load(); s.LatestSeen != "v1.1.0" {
+		t.Errorf("want the result recorded for later runs, got %+v", s)
+	}
+}
+
+// Already current: nothing to say.
+func TestCheckNowQuietWhenCurrent(t *testing.T) {
+	c, _ := newTestChecker(t, "1.1.0", "v1.1.0")
+	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+		t.Fatal(err)
+	}
+	if u := c.CheckNow(); u != nil {
+		t.Errorf("want silence when current, got %+v", u)
+	}
+}
+
+// A failed request falls back to the last version seen rather than reporting
+// nothing: an offline machine should still say what it knew.
+func TestCheckNowFallsBackToTheCachedVersion(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.Endpoint = "http://127.0.0.1:1/dead"
+	if err := c.save(settings{AutoUpdate: stateOn, LatestSeen: "v1.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	u := c.CheckNow()
+	if u == nil || u.Version != "v1.2.0" {
+		t.Errorf("want the cached upgrade when the request fails, got %+v", u)
+	}
+}
+
+// A dev build has no comparison to make, so the feature is inert here too.
+func TestCheckNowDoesNothingForUnComparableVersions(t *testing.T) {
+	c, hits := newTestChecker(t, "1.2.3-4-gabc1234", "v9.9.9")
+	if err := c.save(settings{AutoUpdate: stateOn}); err != nil {
+		t.Fatal(err)
+	}
+	if u := c.CheckNow(); u != nil || hits.Load() != 0 {
+		t.Errorf("want silence for a dev build, got %+v after %d requests", u, hits.Load())
+	}
+}

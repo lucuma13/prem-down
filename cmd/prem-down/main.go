@@ -48,6 +48,11 @@ import (
 // githubRepo where releases are published, the opt-in update check reads it.
 const githubRepo = "lucuma13/prem-down"
 
+// exitUnrecognisedRelease is returned when every file converted but at least one
+// came from a Premiere release this build does not know, so the conversion rests
+// on the assumption that the release only bumped its version number.
+const exitUnrecognisedRelease = 3
+
 // prem-down version, overridden at build time via -ldflags "-X
 // main.version=1.2.3"
 //
@@ -138,11 +143,7 @@ func usage(w io.Writer) {
        prem-down integrate [--remove]
        prem-down auto-update [on|off|status]
 
-Downgrade one or more Premiere Pro projects next to the original project.
-
-Given a Production's .prodset file (or the Production folder), downgrades the
-whole Production into a sibling "<name>_downgraded" folder: its settings, every
-project inside, and a verbatim copy of everything else.
+Downgrade one or more Premiere Pro projects (or Productions) next to the originals.
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
@@ -182,8 +183,8 @@ func dialogRun(updates *updatechecker.Checker, files []string) (string, bool) {
 		gui:     true,
 		updates: updates,
 	}
-	failed := c.run(files) != 0
-	return comSummary(out.String(), errOut.String()), failed
+	code := c.run(files)
+	return comSummary(out.String(), errOut.String()), code != 0 && code != exitUnrecognisedRelease
 }
 
 // comSummary folds a run's two streams into one block of dialog text: failures
@@ -286,18 +287,27 @@ func (c *cli) run(args []string) int {
 	// rest still run, so a batch (a multi-file selection from the context menu, or
 	// a shell glob) isn't aborted by a single bad input. Exit non-zero if any
 	// failed.
+	//
+	// Set by any job whose source came from a Premiere release newer than this
+	// build's version map. Collected across the batch so a mixed selection still
+	// gets the one upgrade notice below.
+	unrecognised := false
 	for _, j := range jobs {
+		d := c.downgrader()
 		if j.production {
 			dst := premdown.UniqueDir(j.path + "_downgraded")
-			if err := c.downgrader().DowngradeProduction(j.path, dst, targetVersion, verbose); err != nil {
+			if err := d.DowngradeProduction(j.path, dst, targetVersion, verbose); err != nil {
 				_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 				failed = true
 			}
+			unrecognised = unrecognised || d.SawUnrecognisedRelease()
 			continue
 		}
 		ext := filepath.Ext(j.path)
 		dst := premdown.UniquePath(strings.TrimSuffix(j.path, ext) + "_downgraded" + premdown.PrprojExt)
-		if err := c.downgrader().Downgrade(j.path, dst, targetVersion, verbose); err != nil {
+		err := d.Downgrade(j.path, dst, targetVersion, verbose)
+		unrecognised = unrecognised || d.SawUnrecognisedRelease()
+		if err != nil {
 			_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 			failed = true
 			continue
@@ -307,12 +317,43 @@ func (c *cli) run(args []string) int {
 	// Only after a clean batch: a run that already reported an error is not a
 	// place to ask the user about update checks.
 	if !failed && c.updates != nil {
-		c.updates.Notify(c.out, c.in, c.gui)
+		c.notifyUpdates(unrecognised)
 	}
 	if failed {
 		return 1
 	}
+	if unrecognised {
+		return exitUnrecognisedRelease
+	}
 	return 0
+}
+
+// notifyUpdates closes a successful run with at most one line about a newer
+// release.
+//
+// Normally that is the routine weekly notice. But when the batch met a Premiere
+// release this build does not know, the notice earns a different message: the
+// engine has already warned that it converted the file on an assumption, and
+// "there is a newer prem-down, which may know that release" could resolve it.
+// That case gets an unthrottled check.
+//
+// The custom path is opt-in only and silent otherwise, which is why a nil
+// result falls through to Notify rather than ending the run: a user who has
+// never been asked should still meet the first-run question on a surface that
+// can put it. Only one of the two ever prints — they would otherwise say the
+// same thing twice.
+//
+// The unrecognised-release notice goes to c.err, next to the warning it
+// answers, rather than to c.out with the "wrote ..." lines.
+func (c *cli) notifyUpdates(unrecognised bool) {
+	if unrecognised {
+		if u := c.updates.CheckNow(); u != nil {
+			_, _ = fmt.Fprintf(c.err, "\nA newer prem-down (%s) is available and may recognise that "+
+				"release — worth downgrading again with it. %s: %s\n", u.Version, u.Verb, u.Target)
+			return
+		}
+	}
+	c.updates.Notify(c.out, c.in, c.gui)
 }
 
 // job is one unit of work: either a lone .prproj (production false, path is the

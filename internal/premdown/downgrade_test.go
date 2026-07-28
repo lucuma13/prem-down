@@ -3,10 +3,12 @@ package premdown
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -657,5 +659,196 @@ func TestDowngrade2026Fixture(t *testing.T) {
 	}
 	if colorOverrides == 0 {
 		t.Error("expected at least one Lumetri color-class param in the fixture")
+	}
+}
+
+// unrecognisedProject writes a project stamped with a <Project> version above
+// anything in the release map — the shape a Premiere release newer than this
+// build's map takes on disk.
+func unrecognisedProject(t *testing.T, dir string, version int) string {
+	t.Helper()
+	xml := fmt.Sprintf(`<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="%d">
+</Project>
+</PremiereData>`, version)
+	path := filepath.Join(dir, "future.prproj")
+	if err := os.WriteFile(path, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A source from a release newer than the version map is converted, not refused:
+// the working assumption is that such a release bumps the version number
+// without changing the serialisation. It must say so on Err, and flag it for
+// the CLI, which turns that into an upgrade check.
+func TestDowngradeWarnsAndProceedsOnUnrecognisedRelease(t *testing.T) {
+	newestVersion := newestKnownProjectVersion()
+	dir := t.TempDir()
+	src := unrecognisedProject(t, dir, newestVersion+2)
+	out := filepath.Join(dir, "out.prproj")
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	if err := d.Downgrade(src, out, 0, false); err != nil {
+		t.Fatalf("an unrecognised release must warn and proceed, got error: %v", err)
+	}
+
+	// Auto-target resolves positionally, so the newest known release is the target.
+	if got := mustGetProjectVersion(t, string(gunzipFile(t, out))); got != newestVersion {
+		t.Errorf("auto-target of an unrecognised source = %d, want %d", got, newestVersion)
+	}
+	if !d.SawUnrecognisedRelease() {
+		t.Error("want the unrecognised release flagged for the CLI")
+	}
+	for _, want := range []string{"warning:", "unrecognised Premiere release (too new)", "Attempting to convert anyway"} {
+		if !strings.Contains(errBuf.String(), want) {
+			t.Errorf("warning missing %q:\n%s", want, errBuf.String())
+		}
+	}
+}
+
+// The warning is about the source, so an explicit --to does not suppress it.
+func TestDowngradeWarnsOnUnrecognisedReleaseWithExplicitTarget(t *testing.T) {
+	newestVersion := newestKnownProjectVersion()
+	dir := t.TempDir()
+	src := unrecognisedProject(t, dir, newestVersion+2)
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	if err := d.Downgrade(src, filepath.Join(dir, "out.prproj"), 41, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "unrecognised") {
+		t.Errorf("--to must not suppress the source warning:\n%s", errBuf.String())
+	}
+}
+
+// One Downgrader is one warning.
+func TestUnrecognisedReleaseWarnsOnce(t *testing.T) {
+	newestVersion := newestKnownProjectVersion()
+	dir := t.TempDir()
+	src := unrecognisedProject(t, dir, newestVersion+2)
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	for i := range 3 {
+		if err := d.Downgrade(src, filepath.Join(dir, fmt.Sprintf("out%d.prproj", i)), 0, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Count(errBuf.String(), "warning:"); got != 1 {
+		t.Errorf("want exactly one warning across three files, got %d:\n%s", got, errBuf.String())
+	}
+	if !d.SawUnrecognisedRelease() {
+		t.Error("the flag must stay set after the warning is suppressed")
+	}
+}
+
+// The known releases are the quiet path: nothing on Err, nothing flagged.
+func TestKnownReleaseIsNotFlagged(t *testing.T) {
+	newestVersion := newestKnownProjectVersion()
+	dir := t.TempDir()
+	src := unrecognisedProject(t, dir, newestVersion)
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	if err := d.Downgrade(src, filepath.Join(dir, "out.prproj"), 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if d.SawUnrecognisedRelease() || errBuf.Len() > 0 {
+		t.Errorf("the newest known release must be quiet, got flag=%v err=%q",
+			d.SawUnrecognisedRelease(), errBuf.String())
+	}
+}
+
+// Field re-insertion is decided by the target.
+func TestNeedsFieldReinsertion(t *testing.T) {
+	const dense = lastDenseSerialisationProjectVersion
+	cases := []struct {
+		name           string
+		source, target int
+		want           bool
+	}{
+		{"2026 -> 2025: sparse source, dense target", 45, dense, true},
+		{"2026 -> 2022: sparse source, older dense target", 45, 40, true},
+		{"2027 -> 2026: both sparse, nothing to insert", 47, 45, false},
+		{"2027 -> 2025: sparse source jumping the boundary", 47, dense, true},
+		{"2024 -> 2023: both dense, already complete", 42, 41, false},
+		{"2025 -> 2024: source is the boundary itself", dense, 42, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsFieldReinsertion(tc.source, tc.target); got != tc.want {
+				t.Errorf("needsFieldReinsertion(%d, %d) = %v, want %v", tc.source, tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
+// End-to-end for the row that matters: a sparse source converted to a sparse
+// target must come out with the fields still absent, exactly as the target
+// release writes them itself. Re-inserting here would write fields that release
+// never writes, and would also have to survive a verify pass built for the
+// dense-target case.
+func TestSparseToSparseInsertsNothing(t *testing.T) {
+	newest := newestKnownProjectVersion()
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="` + strconv.Itoa(newest+2) + `">
+` + sparseVideoComponentParam + `
+</Project>
+</PremiereData>`
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(dir, "out.prproj")
+	var outBuf bytes.Buffer
+	d := &Downgrader{Out: &outBuf}
+	if err := d.Downgrade(src, out, 0, true); err != nil {
+		t.Fatalf("sparse -> sparse must convert, got: %v", err)
+	}
+
+	got := string(gunzipFile(t, out))
+	for _, field := range []string{"LowerBound", "UpperBound"} {
+		if strings.Contains(got, "<"+field+">") {
+			t.Errorf("%s was re-inserted for a target that omits it natively:\n%s", field, got)
+		}
+	}
+	// The version stamp is the entire change.
+	if want := mustSetProjectVersion(t, xml, newest); got != want {
+		t.Errorf("sparse -> sparse should only re-gate the version, got:\n%s", got)
+	}
+	if !strings.Contains(outBuf.String(), "nothing to re-insert") {
+		t.Errorf("verbose output should explain why nothing was inserted:\n%s", outBuf.String())
+	}
+}
+
+// The same source with an explicit --to below the boundary still gets the full
+// repair: the target is a release that requires the fields.
+func TestSparseSourceJumpingTheBoundaryStillReinserts(t *testing.T) {
+	newest := newestKnownProjectVersion()
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="` + strconv.Itoa(newest+2) + `">
+` + sparseVideoComponentParam + `
+</Project>
+</PremiereData>`
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(dir, "out.prproj")
+	if err := silent().Downgrade(src, out, lastDenseSerialisationProjectVersion, false); err != nil {
+		t.Fatalf("sparse -> dense must convert, got: %v", err)
+	}
+	got := string(gunzipFile(t, out))
+	for _, field := range []string{"LowerBound", "UpperBound"} {
+		if !strings.Contains(got, "<"+field+">") {
+			t.Errorf("%s must be re-inserted for a dense target:\n%s", field, got)
+		}
 	}
 }

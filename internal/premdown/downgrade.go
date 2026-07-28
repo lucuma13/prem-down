@@ -41,6 +41,11 @@ import (
 type Downgrader struct {
 	Out io.Writer
 	Err io.Writer
+
+	// unrecognised records that a source carried a <Project> version above the
+	// newest release in the version map, and doubles as the warn-once latch.
+	// One Downgrader is one warning.
+	unrecognised bool
 }
 
 func (d *Downgrader) out() io.Writer {
@@ -57,7 +62,18 @@ func (d *Downgrader) errw() io.Writer {
 	return d.Err
 }
 
-const lastDenseSerialisationProjectVersion = 43 // sources above it need field re-insertion
+// SawUnrecognisedRelease reports whether anything this Downgrader converted
+// came from a Premiere release newer than any in the version map. Exported for
+// the CLI, which turns it into the one thing this package cannot know: whether
+// a newer prem-down exists that would recognise it.
+func (d *Downgrader) SawUnrecognisedRelease() bool { return d.unrecognised }
+
+// The last release that both wrote and required the dense serialisation.
+// Releases above it write the sparse form; releases at or below it refuse to
+// open a project that arrives in that form. So it is the boundary in BOTH
+// directions, and which side each end of a conversion falls on is what decides
+// whether field re-insertion is needed at all — see needsFieldReinsertion.
+const lastDenseSerialisationProjectVersion = 43
 
 // Map of Premiere release -> the XML <Project> Version that release uses
 // natively.
@@ -91,6 +107,14 @@ var releases = []struct {
 	{42, "2024", nil},
 	{43, "2025", nil},
 	{45, "2026", nil},
+}
+
+// newestKnownProjectVersion is the last entry's: releases is stored
+// oldest-first, so the highest XML <Project> version in the map is the newest
+// release prem-down knows about. A source above it is from a Premiere this
+// build has never been told about.
+func newestKnownProjectVersion() int {
+	return releases[len(releases)-1].xmlProjectVersion
 }
 
 // releaseNames lists the known releases newest-first (releases is stored
@@ -267,13 +291,37 @@ func (e *notOlderError) Error() string {
 		"--to must name an older release", e.target, e.source)
 }
 
+// warnUnrecognised reports a source from a release newer than any in the
+// version map, and proceeds.
+//
+// It warns rather than refuses because the map's newest entry is a statement
+// about what has been tested, not about what works. On the working assumption
+// that such a release only bumps the version number the conversion is already
+// the right one.
+func (d *Downgrader) warnUnrecognised(src string, sourceVersion int) {
+	if sourceVersion <= newestKnownProjectVersion() {
+		return
+	}
+	if d.unrecognised {
+		return // already warned for this Downgrader; the flag stays set
+	}
+	d.unrecognised = true
+	_, _ = fmt.Fprintf(d.errw(),
+		"warning: %s: unrecognised Premiere release (too new). Attempting to convert anyway.\n", src)
+}
+
 // resolveTarget turns the requested target into a concrete XML <Project>
 // Version for a source at sourceVersion. A request of 0 means "auto": take the
 // release one step below the source, which is the default when no --to is
 // given. Anything else is checked against the source, because this is a
 // downgrader — an explicit --to at or above the source release is almost
 // certainly user error, so refuse rather than stamp a higher version.
-func (d *Downgrader) resolveTarget(sourceVersion, requested int, verbose bool) (int, error) {
+//
+// src names the file being resolved, for the unrecognised-release warning only.
+func (d *Downgrader) resolveTarget(src string, sourceVersion, requested int, verbose bool) (int, error) {
+	// Before the branch: an unrecognised source is worth saying regardless of
+	// whether the target was chosen automatically or given with --to.
+	d.warnUnrecognised(src, sourceVersion)
 	if requested != 0 {
 		if requested >= sourceVersion {
 			return 0, &notOlderError{target: requested, source: sourceVersion}
@@ -292,22 +340,30 @@ func (d *Downgrader) resolveTarget(sourceVersion, requested int, verbose bool) (
 	return pv, nil
 }
 
+// needsFieldReinsertion reports whether this conversion has to re-insert the
+// fields the sparse serialisation omits.
+func needsFieldReinsertion(sourceVersion, targetVersion int) bool {
+	return sourceVersion > lastDenseSerialisationProjectVersion &&
+		targetVersion <= lastDenseSerialisationProjectVersion
+}
+
 // verifyDowngraded is the self-check run on the finished document before it is
 // written. It refuses (returns an error, so nothing is written) unless every
 // invariant a correct downgrade must satisfy holds:
 //
-//   - the stamped <Project> version reads back as the requested target, and
-//   - a second reconstruction pass is a no-op: it parses cleanly, its
-//     render-fidelity guard passes on every class instance, it inserts no field
-//     (every reconstruct class already carries all fields 2025 requires), and it
-//     renders byte-for-byte identical output.
+//   - the stamped <Project> version reads back as the requested target,
+//   - the finished document still parses, and the render-fidelity guard inside
+//     reconstructPositionalClasses passes on every class instance, and
+//   - when this conversion was supposed to re-insert fields, a second
+//     reconstruction pass is a no-op: it inserts nothing (every reconstruct class
+//     already carries all fields the target requires) and renders byte-for-byte
+//     identical output.
 //
-// Reaching a fixpoint is the whole invariant: if a second pass would add a
-// field, the first pass left one missing; if it would render different bytes,
-// the round-trip is lossy. Either way this turns a would-be silent corruption
-// into a hard refusal — the guarantee TestDowngrade2026Fixture asserts, applied
-// to every file a user actually downgrades rather than only to the fixture.
-func verifyDowngraded(xml string, wantVersion int) error {
+// Reaching a fixpoint is the whole invariant for the third check: if a second
+// pass would add a field, the first pass left one missing; if it would render
+// different bytes, the round-trip is lossy. Either way this turns a would-be
+// silent corruption into a hard refusal.
+func verifyDowngraded(xml string, wantVersion int, reinserted bool) error {
 	got, err := getProjectVersion(xml)
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
@@ -318,6 +374,9 @@ func verifyDowngraded(xml string, wantVersion int) error {
 	reXML, stats, err := reconstructPositionalClasses(xml)
 	if err != nil {
 		return fmt.Errorf("verify: re-parse of the output failed: %w", err)
+	}
+	if !reinserted {
+		return nil
 	}
 	if reXML != xml {
 		return fmt.Errorf("verify: a second reconstruction pass changed the output; the first pass was not a fixpoint")
@@ -349,14 +408,14 @@ func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool
 	if err != nil {
 		return err
 	}
-	projectVersion, err = d.resolveTarget(sourceVersion, projectVersion, verbose)
+	projectVersion, err = d.resolveTarget(src, sourceVersion, projectVersion, verbose)
 	if err != nil {
 		return err
 	}
 
-	needsNormalize := sourceVersion > lastDenseSerialisationProjectVersion
+	reinsert := needsFieldReinsertion(sourceVersion, projectVersion)
 	stats := map[fieldKey]int{}
-	if needsNormalize {
+	if reinsert {
 		xml, stats, err = reconstructPositionalClasses(xml)
 		if err != nil {
 			return err
@@ -367,7 +426,8 @@ func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool
 		return err
 	}
 	if verbose {
-		if needsNormalize {
+		switch {
+		case reinsert:
 			keys := make([]fieldKey, 0, len(stats))
 			for k := range stats {
 				keys = append(keys, k)
@@ -381,7 +441,10 @@ func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool
 			for _, k := range keys {
 				_, _ = fmt.Fprintf(d.out(), "  inserted %s/%s (%dx)\n", k.tag, k.field, stats[k])
 			}
-		} else {
+		case sourceVersion > lastDenseSerialisationProjectVersion:
+			_, _ = fmt.Fprintf(d.out(), "  target version %d omits the same fields as the source; "+
+				"nothing to re-insert, only re-gating <Project> version\n", projectVersion)
+		default:
 			_, _ = fmt.Fprintf(d.out(), "  source is version %d (<= %d); class formats already compatible, "+
 				"only re-gating <Project> version\n", sourceVersion, lastDenseSerialisationProjectVersion)
 		}
@@ -391,7 +454,7 @@ func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool
 	// Prove the transform before committing it to disk: re-gated version, every
 	// reconstruct class complete, parse/render round-trip lossless. A failure
 	// here means we would otherwise write a corrupt project, so refuse instead.
-	if err := verifyDowngraded(xml, projectVersion); err != nil {
+	if err := verifyDowngraded(xml, projectVersion, reinsert); err != nil {
 		return err
 	}
 

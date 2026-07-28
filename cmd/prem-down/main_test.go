@@ -5,11 +5,14 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"unicode/utf16"
 
@@ -697,6 +700,159 @@ func TestRunAutoTargetsEachProjectIndependently(t *testing.T) {
 	} {
 		if got := projectVersionOf(t, filepath.Join(dir, tc.out)); got != tc.want {
 			t.Errorf("%s: got Project version %d, want %d", tc.out, got, tc.want)
+		}
+	}
+}
+
+// writeFutureProject writes a project stamped with a <Project> version far above
+// anything in the release map — a Premiere newer than this build knows about.
+// A literal is used rather than the map's own newest entry so the test keeps
+// meaning the same thing after the map gains a release.
+func writeFutureProject(t *testing.T, dir, name string) string {
+	t.Helper()
+	const xml = `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="99">
+</Project>
+</PremiereData>`
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(xml), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+	return path
+}
+
+// stubReleases points a testCLI's update check at a server answering with tag,
+// counting requests, so no test ever reaches GitHub.
+func stubReleases(t *testing.T, c *testCLI, tag string) *atomic.Int32 {
+	t.Helper()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, `{"tag_name":"`+tag+`"}`)
+	}))
+	t.Cleanup(srv.Close)
+	c.updates.Endpoint = srv.URL
+	return &hits
+}
+
+// optIn records a prior "yes" to update checks, as a user who answered the
+// first-run question would have.
+func optIn(t *testing.T, c *testCLI) {
+	t.Helper()
+	if code := c.updates.Command(io.Discard, io.Discard, []string{"on"}); code != 0 {
+		t.Fatalf("failed to opt in, code=%d", code)
+	}
+}
+
+// Meeting a Premiere release this build does not know is the one moment an
+// update check earns its own message: the file was converted on an assumption,
+// and a newer prem-down may simply know the release. Opted in, the run warns,
+// converts, and points at the upgrade.
+func TestRunOffersAnUpgradeForAnUnrecognisedRelease(t *testing.T) {
+	c := newTestCLI(t, "")
+	optIn(t, c)
+	hits := stubReleases(t, c, "v2.0.0")
+	src := writeFutureProject(t, t.TempDir(), "in.prproj")
+
+	// Converted, but on an assumption: its own exit code, not a plain success.
+	if code := c.run([]string{src}); code != exitUnrecognisedRelease {
+		t.Fatalf("want code=%d, got code=%d err=%s", exitUnrecognisedRelease, code, c.err)
+	}
+	if !strings.Contains(c.out.String(), "wrote ") {
+		t.Errorf("want the file converted:\n%s", c.out)
+	}
+	for _, want := range []string{"unrecognised", "newer prem-down", "2.0.0"} {
+		if !strings.Contains(c.err.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, c.err)
+		}
+	}
+	if hits.Load() != 1 {
+		t.Errorf("want one update request, got %d", hits.Load())
+	}
+}
+
+// No upgrade to offer — already current, or offline — leaves the warning to
+// stand on its own. The conversion is unaffected either way.
+func TestRunStillWarnsWhenNoUpgradeIsAvailable(t *testing.T) {
+	c := newTestCLI(t, "")
+	optIn(t, c)
+	stubReleases(t, c, "v1.0.0") // same as the test CLI's version
+	src := writeFutureProject(t, t.TempDir(), "in.prproj")
+
+	// Nothing to offer does not make it a clean run: the assumption still stands.
+	if code := c.run([]string{src}); code != exitUnrecognisedRelease {
+		t.Fatalf("want code=%d, got code=%d err=%s", exitUnrecognisedRelease, code, c.err)
+	}
+	if !strings.Contains(c.out.String(), "wrote ") {
+		t.Errorf("want the file converted:\n%s", c.out)
+	}
+	if !strings.Contains(c.err.String(), "unrecognised") {
+		t.Errorf("the warning must stand alone:\n%s", c.err)
+	}
+	if strings.Contains(c.err.String(), "newer prem-down") {
+		t.Errorf("nothing to upgrade to, so nothing should be offered:\n%s", c.err)
+	}
+}
+
+// Without opt-in the check is silent, but the run must still fall through to the
+// ordinary notice — otherwise a user who has never been asked would miss the
+// first-run question on the very surface built to put it.
+func TestRunUnrecognisedReleaseWithoutOptInStillAsks(t *testing.T) {
+	c := newTestCLI(t, "")
+	asks := 0
+	c.updates.Ask = func(string, io.Reader, io.Writer) bool { asks++; return false }
+	c.updates.Endpoint = "http://127.0.0.1:1/dead" // opting out means it is never reached
+	src := writeFutureProject(t, t.TempDir(), "in.prproj")
+
+	if code := c.run([]string{"--gui", src}); code != exitUnrecognisedRelease {
+		t.Fatalf("want code=%d, got code=%d err=%s", exitUnrecognisedRelease, code, c.err)
+	}
+	if asks != 1 {
+		t.Errorf("want the first-run question still asked once, got %d", asks)
+	}
+	if !strings.Contains(c.err.String(), "unrecognised") {
+		t.Errorf("want the warning regardless of the update setting:\n%s", c.err)
+	}
+	if strings.Contains(c.err.String(), "newer prem-down") {
+		t.Errorf("no opt-in means no upgrade offer:\n%s", c.err)
+	}
+}
+
+// A recognised release takes the routine path: the ordinary weekly notice on
+// stdout, and none of the unrecognised-release wording.
+func TestRunKnownReleaseUsesTheOrdinaryNotice(t *testing.T) {
+	c := newTestCLI(t, "")
+	optIn(t, c)
+	stubReleases(t, c, "v2.0.0")
+	src := writeProject(t, t.TempDir(), "in.prproj")
+
+	if code := c.run([]string{src}); code != 0 {
+		t.Fatalf("want a clean run, got code=%d err=%s", code, c.err)
+	}
+	if !strings.Contains(c.out.String(), "is available") {
+		t.Errorf("want the routine notice on stdout:\n%s", c.out)
+	}
+	if strings.Contains(c.err.String(), "unrecognised") || strings.Contains(c.err.String(), "newer prem-down") {
+		t.Errorf("a known release must not mention an unrecognised one:\n%s", c.err)
+	}
+}
+
+// The exit code says "look at this", but the Windows message box must not call a
+// successful conversion an error: every file was written, and the caution is
+// already in the text. Only a real failure gets the error icon.
+func TestDialogRunDoesNotFlagAnUnrecognisedReleaseAsFailed(t *testing.T) {
+	updates := updatechecker.New(githubRepo, "prem-down", "1.0.0")
+	updates.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	updates.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	src := writeFutureProject(t, t.TempDir(), "in.prproj")
+
+	summary, failed := dialogRun(updates, []string{src})
+	if failed {
+		t.Error("an unrecognised release converted every file; it is not a failure")
+	}
+	for _, want := range []string{"unrecognised Premiere release (too new)", "wrote "} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("dialog text missing %q:\n%s", want, summary)
 		}
 	}
 }

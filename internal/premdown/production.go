@@ -191,7 +191,7 @@ func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbo
 	if err != nil {
 		return err
 	}
-	projectVersion, err = d.resolveTarget(*v.Project, projectVersion, verbose)
+	projectVersion, err = d.resolveTarget(src, *v.Project, projectVersion, verbose)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (d *Downgrader) productionTarget(prodset string, requested int, verbose boo
 	if err != nil {
 		return 0, err
 	}
-	target, err := d.resolveTarget(*v.Project, requested, verbose)
+	target, err := d.resolveTarget(prodset, *v.Project, requested, verbose)
 	if err != nil {
 		return 0, err
 	}

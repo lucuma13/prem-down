@@ -111,3 +111,39 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 	verb, target := c.upgradeHint()
 	_, _ = fmt.Fprintf(out, "\n%s %s is available. %s: %s\n", c.Product, s.LatestSeen, verb, target)
 }
+
+// Upgrade is a newer release that is available, and how to get it.
+type Upgrade struct {
+	Version string // the newer release, as its tag reads
+	Verb    string // "Run" or "Download", per the install channel
+	Target  string // the command to run, or the page to download from
+}
+
+// CheckNow is Notify's counterpart for the moment the host program hits
+// something a newer release might handle better, rather than the routine
+// end-of-run notice. It returns the available upgrade, or nil.
+//
+// Three deliberate differences from Notify:
+//
+//   - It never asks (only executes if the user already opted in).
+//   - It ignores the throttle..
+//   - It returns rather than prints ("an update is available and may
+//     recognise that file").
+func (c *Checker) CheckNow() *Upgrade {
+	if parseVersion(c.Version) == nil {
+		return nil // dev build: no comparison to make
+	}
+	s, err := c.load()
+	if err != nil || s.AutoUpdate != stateOn {
+		return nil
+	}
+	if latest, err := c.latest(); err == nil {
+		s.LastChecked, s.LatestSeen = c.now(), latest
+		_ = c.save(s)
+	}
+	if s.LatestSeen == "" || !Newer(c.Version, s.LatestSeen) {
+		return nil
+	}
+	verb, target := c.upgradeHint()
+	return &Upgrade{Version: s.LatestSeen, Verb: verb, Target: target}
+}

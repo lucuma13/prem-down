@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -506,5 +507,43 @@ func TestUniqueDirDoesNotSplitOnDots(t *testing.T) {
 	}
 	if got, want := UniqueDir(taken), taken+"-1"; got != want {
 		t.Errorf("UniqueDir = %q, want %q", got, want)
+	}
+}
+
+// A Production stamps one version across every file in it, so an unrecognised
+// release is one fact about the Production.
+func TestUnrecognisedProductionWarnsOnceForTheProdset(t *testing.T) {
+	newestVersion := newestKnownProjectVersion()
+	future := strconv.Itoa(newestVersion + 2)
+
+	src := newProduction(t, "Prod")
+	prodset := filepath.Join(src, "Prod"+ProdsetExt)
+	writeFile(t, prodset, strings.ReplaceAll(
+		strings.ReplaceAll(prodset2026, `"mProjectVersion":45`, `"mProjectVersion":`+future),
+		`"mMinCompatibleProjectVersion":45`, `"mMinCompatibleProjectVersion":`+future))
+	for _, p := range []string{"Untitled" + PrprojExt, filepath.Join("subfolder", "nested"+PrprojExt)} {
+		writeFile(t, filepath.Join(src, p),
+			strings.Replace(prodProject, `Version="45"`, `Version="`+future+`"`, 1))
+	}
+
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := d.DowngradeProduction(src, dst, 0, false); err != nil {
+		t.Fatalf("an unrecognised Production must convert, got: %v", err)
+	}
+	if got := strings.Count(errBuf.String(), "unrecognised"); got != 1 {
+		t.Errorf("want one warning for the whole Production, got %d:\n%s", got, errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "Prod"+ProdsetExt) {
+		t.Errorf("want the warning to name the settings file that carries the version:\n%s", errBuf.String())
+	}
+	if !d.SawUnrecognisedRelease() {
+		t.Error("want the Production flagged for the CLI")
+	}
+	// Converted, not refused: every file lands at the newest known release.
+	// The mirrored settings file takes the output folder's name, as Premiere requires.
+	if js := readProdsetFile(t, filepath.Join(dst, "out"+ProdsetExt)); !strings.Contains(js, `"mProjectVersion":`+strconv.Itoa(newestVersion)) {
+		t.Errorf("want the settings stamped at %d, got:\n%s", newestVersion, js)
 	}
 }
