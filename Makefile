@@ -9,6 +9,10 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 GOBIN   := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
 EXE     := $(GOBIN)/$(BINARY)$(shell go env GOEXE)
 
+# Where the macOS .pkg, plus the receipt it registers
+PKGID   := com.lucuma13.$(BINARY)
+PKGEXE  := /usr/local/bin/$(BINARY)
+
 setup-dev: ## Install dev pre-requisites (Go, pre-commit)
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "winget install -e --silent --accept-package-agreements --accept-source-agreements GoLang.Go astral-sh.uv; $$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); uv tool install pre-commit; uv tool update-shell; uv tool run pre-commit install"
@@ -37,11 +41,22 @@ install: ## Install to $GOBIN and integrate the right-click action (macOS/Window
 	  *) echo "integrate: skipped (only macOS and Windows are supported)" ;; \
 	esac
 
-uninstall: ## Remove the installed binary and its right-click integration
+uninstall: ## Remove the installed binaries ($GOBIN and .pkg) and the right-click integration
 	@case "$$(uname -s)" in \
-	  Darwin|MINGW*|MSYS*|CYGWIN*) [ -x "$(EXE)" ] && "$(EXE)" integrate --remove || true ;; \
+	  Darwin|MINGW*|MSYS*|CYGWIN*) \
+	    for b in "$(EXE)" "$(PKGEXE)"; do \
+	      if [ -x "$$b" ]; then "$$b" integrate --remove || true; break; fi; \
+	    done ;; \
 	esac
 	rm -f "$(EXE)"
+	@case "$$(uname -s)" in \
+	  Darwin) \
+	    if [ -e "$(PKGEXE)" ] || pkgutil --pkg-info $(PKGID) >/dev/null 2>&1; then \
+	      echo "Removing the .pkg-installed copy at $(PKGEXE) (needs sudo)."; \
+	      sudo rm -f "$(PKGEXE)" "/usr/local/bin/._$(BINARY)"; \
+	      sudo pkgutil --forget $(PKGID) >/dev/null 2>&1 || true; \
+	    fi ;; \
+	esac
 
 reinstall: ## Uninstall any previous copy, then install fresh
 	$(MAKE) uninstall
