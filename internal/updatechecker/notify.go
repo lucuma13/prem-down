@@ -48,8 +48,8 @@ func (c *Checker) prompt(in io.Reader, out io.Writer) bool {
 // succeeded, and reports a newer release on out.
 //
 // mayAsk says this run is attached to a surface where a question can be put to
-// the user and answered — for a file-manager integration, the console window or
-// desktop dialog it already owns. The first-run question is only asked there:
+// the user and answered — for a file-manager integration, a desktop dialog or a
+// console it already owns. The first-run question is only asked there:
 // those are the surfaces where the user has no other way to discover the
 // setting, and the ones with somewhere to put a question. A plain terminal run
 // stays silent and scriptable; that user has the auto-update subcommand and

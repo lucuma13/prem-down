@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -25,12 +28,14 @@ type testCLI struct {
 	err *bytes.Buffer // captured stderr
 }
 
-// newTestCLI builds a testCLI; stdin seeds the reader the --gui pause consumes.
+// newTestCLI builds a testCLI; stdin seeds anything that prompts (nothing does
+// on macOS or Windows, where both prompts are dialogs, but the update checker
+// takes a reader for hosts whose prompt is a console).
 //
 // The update check is wired to a settings file under t.TempDir and to an Ask
 // that always declines, so a --gui test can never read or write the real
-// settings file, reach the network, or raise an osascript dialog mid-test.
-// Tests that exercise the check itself override these fields.
+// settings file, reach the network, or raise a dialog mid-test. Tests that
+// exercise the check itself override these fields.
 func newTestCLI(t *testing.T, stdin string) *testCLI {
 	t.Helper()
 	out, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
@@ -204,8 +209,10 @@ func TestRunBatchSuccess(t *testing.T) {
 
 // --gui makes run wait for Enter before returning (the OS context menu opens a
 // console that would otherwise vanish). The injected stdin already holds a
-// newline so the pause returns; this covers the gui branch of pauseIfGUI.
-func TestRunGUIPauses(t *testing.T) {
+// newline so the pause returns; this covers the gui branch of pauseIfGUI. --gui
+// marks a run as coming from the file manager; it opens the door to the update
+// check's question.
+func TestRunGUIFlag(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.prproj")
 	const xml = `<PremiereData Version="3">
@@ -541,5 +548,155 @@ func TestReleaseVersion(t *testing.T) {
 func TestVersionDefaultsToDevInAWorkingTreeBuild(t *testing.T) {
 	if version != "dev" {
 		t.Errorf("a working-tree build should report dev, got %q", version)
+	}
+}
+
+// --------------------------------------------------------------------------
+// The Windows context-menu path
+// --------------------------------------------------------------------------
+
+func TestComSummary(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdout, stderr, want string
+	}{
+		{"success only", "wrote a_downgraded.prproj\n", "", "wrote a_downgraded.prproj"},
+		// Failures come first: they are what the user has to act on.
+		{
+			"both", "wrote a_downgraded.prproj\n", "error: b.prproj: broken\n",
+			"error: b.prproj: broken\n\nwrote a_downgraded.prproj",
+		},
+		{"failure only", "", "error: b.prproj: broken\n", "error: b.prproj: broken"},
+		// A run that produced no output at all still needs something to show.
+		{"neither", "", "", "Nothing to downgrade."},
+		{"whitespace only", "  \n", "\n", "Nothing to downgrade."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := comSummary(tc.stdout, tc.stderr); got != tc.want {
+				t.Errorf("comSummary(%q, %q) = %q, want %q", tc.stdout, tc.stderr, got, tc.want)
+			}
+		})
+	}
+}
+
+// testChecker is an update checker that cannot touch the real settings, reach
+// the network, or put a dialog on screen.
+func testChecker(t *testing.T) *updatechecker.Checker {
+	t.Helper()
+	u := updatechecker.New(githubRepo, "prem-down", "1.0.0")
+	u.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	u.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	return u
+}
+
+// The context-menu round trip.
+func TestDialogRunReportsSuccess(t *testing.T) {
+	dir := t.TempDir()
+	src := writeProject(t, dir, "in.prproj")
+
+	summary, failed := dialogRun(testChecker(t), []string{src})
+	if failed {
+		t.Errorf("a good project should not report failure: %q", summary)
+	}
+	if !strings.Contains(summary, "wrote ") || !strings.Contains(summary, "_downgraded") {
+		t.Errorf("summary should name what was written, got %q", summary)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "in_downgraded.prproj")); err != nil {
+		t.Errorf("the conversion should have happened in-process: %v", err)
+	}
+}
+
+// A mixed selection must still convert what it can, and the dialog has to lead
+// with the failure while still crediting the file that worked.
+func TestDialogRunReportsPartialFailure(t *testing.T) {
+	dir := t.TempDir()
+	good := writeProject(t, dir, "good.prproj")
+	bad := filepath.Join(dir, "bad.prproj")
+	if err := os.WriteFile(bad, []byte("not a premiere project"), 0o644); err != nil { //nolint:gosec // G306: test fixture file, perms irrelevant
+		t.Fatal(err)
+	}
+
+	summary, failed := dialogRun(testChecker(t), []string{bad, good})
+	if !failed {
+		t.Error("a failed file should make the dialog report failure")
+	}
+	if !strings.HasPrefix(summary, "error:") {
+		t.Errorf("the error should lead the summary, got %q", summary)
+	}
+	if !strings.Contains(summary, "good") {
+		t.Errorf("the file that converted should still be reported, got %q", summary)
+	}
+}
+
+// --------------------------------------------------------------------------
+// Auto-targeting across a mixed batch. The engine's per-source resolution is
+// covered in internal/premdown; what matters here is that run() keeps it
+// per-file — hoisting the resolution out of the loop would silently give every
+// project in a selection the same target.
+// --------------------------------------------------------------------------
+
+// sharedFixture copies one of the conversion fixtures into dir. These two tests
+// need projects at genuinely different releases, which the inline XML elsewhere
+// in this file cannot provide.
+func sharedFixture(t *testing.T, dir, name, as string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "premdown", "testdata", name)) //nolint:gosec // G304: name is a fixture filename this test file supplies, not external input
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, as)
+	if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // G306: test fixture copy, perms irrelevant
+		t.Fatal(err)
+	}
+	return dst
+}
+
+// projectVersionOf reads the <Project> version back out of a produced file.
+func projectVersionOf(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: a path the test just produced under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("%s is not gzipped: %v", path, err)
+	}
+	defer func() { _ = zr.Close() }()
+	xml, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`<Project [^>]*Version="(\d+)"`).FindSubmatch(xml)
+	if m == nil {
+		t.Fatalf("no <Project> version found in %s", path)
+	}
+	v, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// Two projects at different releases, downgraded in one invocation, must each
+// land one release below their own source.
+func TestRunAutoTargetsEachProjectIndependently(t *testing.T) {
+	dir := t.TempDir()
+	src25 := sharedFixture(t, dir, "fixture_ppro25.prproj", "a2025.prproj")
+	src26 := sharedFixture(t, dir, "fixture_ppro26.prproj", "b2026.prproj")
+
+	c := newTestCLI(t, "")
+	if code := c.run([]string{src25, src26}); code != 0 {
+		t.Fatalf("mixed batch should succeed, got code=%d:\n%s", code, c.err)
+	}
+	for _, tc := range []struct {
+		out  string
+		want int
+	}{
+		{"a2025_downgraded.prproj", 42},
+		{"b2026_downgraded.prproj", 43},
+	} {
+		if got := projectVersionOf(t, filepath.Join(dir, tc.out)); got != tc.want {
+			t.Errorf("%s: got Project version %d, want %d", tc.out, got, tc.want)
+		}
 	}
 }

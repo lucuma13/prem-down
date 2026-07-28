@@ -19,6 +19,13 @@ import (
 	"io"
 )
 
+// Downgrader converts one file-manager selection and returns what to tell the
+// user: a summary to show, and whether anything failed. Only the Windows COM
+// handler calls one — it does the work in-process and reports in a message box
+// — but the type is declared here so MaybeRunCOMServer has the same signature
+// on every platform.
+type Downgrader func(files []string) (summary string, failed bool)
+
 func usageIntegrate(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage: prem-down integrate [--remove]
 

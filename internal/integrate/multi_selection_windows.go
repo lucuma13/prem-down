@@ -1,9 +1,7 @@
 // Receives an entire multi-file File Explorer selection in one activation.
 //
-// This file exists only to support selecting several projects at once. File
-// Explorer runs a command verb once per selected file, so downgrading eight
-// projects would mean eight processes and eight console windows. A Drop Target
-// verb instead packages the whole selection into a single Drop call.
+// This file exists only to support selecting several projects at once. A Drop
+// Target verb packages a selection of several files into a single Drop call.
 //
 // The cost of that is a COM handler: the verb's key points at a CLSID, that
 // CLSID is registered as a LocalServer32 on prem-down's own exe (see
@@ -11,8 +9,8 @@
 // "-Embedding" to activate it.
 //
 // Once activated, the code here registers a class factory, waits for Explorer's
-// Drop, pulls the selected paths out of the CF_HDROP, and relaunches "prem-down
-// --gui <files...>" in one fresh console window.
+// Drop, pulls the selected paths out of the CF_HDROP, downgrades them in this
+// same process, and reports the outcome in a message box.
 //
 // The COM plumbing is hand-rolled on the syscall package (vtables built with
 // syscall.NewCallback) so prem-down stays a single dependency-free binary. Only
@@ -24,8 +22,6 @@
 package integrate
 
 import (
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -55,6 +51,7 @@ var (
 	procDispatchMessageW   = moduser32.NewProc("DispatchMessageW")
 	procPostThreadMessageW = moduser32.NewProc("PostThreadMessageW")
 	procShowWindow         = moduser32.NewProc("ShowWindow")
+	procMessageBoxW        = moduser32.NewProc("MessageBoxW")
 
 	// GetCurrentThreadId lives in kernel32 (not user32, where the other
 	// thread-message procs come from); LazyProc panics at call time if the
@@ -100,13 +97,23 @@ const (
 	tymedHGlobal    = 1
 	dropeffectCopy  = 1
 
-	wmQuit           = 0x0012
-	createNewConsole = 0x00000010
-	swHide           = 0 // ShowWindow: hide the window
+	wmQuit = 0x0012
+	swHide = 0 // ShowWindow: hide the window
+
+	// MessageBoxW flags. SETFOREGROUND and TOPMOST matter here because the
+	// server owns no window and was launched by COM rather than by the user
+	// clicking something: without them the box can open behind Explorer.
+	mbOK              = 0x00000000
+	mbIconError       = 0x00000010
+	mbIconInformation = 0x00000040
+	mbSetForeground   = 0x00010000
+	mbTopmost         = 0x00040000
 
 	// serverTimeout bounds how long an activated server lingers if Explorer
 	// never drives it to a Drop (e.g. the activation is abandoned), so it can
-	// never hang around as an orphaned background process.
+	// never hang around as an orphaned background process. It is stopped as
+	// soon as a Drop arrives: past that point the conversion sets the pace, and
+	// a large Production can legitimately outlast this.
 	serverTimeout = 60 * time.Second
 )
 
@@ -114,6 +121,23 @@ const (
 // safety timer) post WM_QUIT to it to end the pump. Kept as uintptr (a thread
 // id fits) so it feeds PostThreadMessageW without a narrowing conversion.
 var serverThreadID uintptr
+
+// serverTimer is the safety timeout above, kept here so Drop can stop it.
+var serverTimer *time.Timer
+
+// downgrade does the actual conversion; supplied by the caller of
+// MaybeRunCOMServer so this package keeps to the Windows plumbing and the
+// command layer keeps the job planning. Read only from the Drop callback.
+var downgrade Downgrader
+
+// workStarted says Drop handed a selection to the worker goroutine, so the
+// server must wait for it before letting the process exit. Both the write (in
+// Drop) and the read (after the pump) happen on the STA thread.
+var workStarted bool
+
+// workDone is closed by the worker once the conversion and its message box are
+// finished.
+var workDone = make(chan struct{})
 
 type guid struct {
 	Data1 uint32
@@ -281,21 +305,85 @@ func dropDragOver(_ unsafe.Pointer, _ uintptr, _ uintptr, pdwEffect *uint32) uin
 
 func dropDragLeave(_ unsafe.Pointer) uintptr { return sOK }
 
+// dropDrop receives the selection. It reads the paths and returns to Explorer
+// straight away, converting on another goroutine: Drop is a blocking
+// out-of-process COM call made from Explorer's own thread, so doing the work
+// inline would freeze the window the user just clicked in for as long as the
+// conversion takes — and could trip COM's "server is busy" dialog.
 func dropDrop(_ unsafe.Pointer, pDataObj unsafe.Pointer, _ uintptr, _ uintptr, pdwEffect *uint32) uintptr {
 	*pdwEffect = dropeffectCopy
-	if files := extractHDROPFiles(pDataObj); len(files) > 0 {
-		_ = launchDowngradeConsole(files)
+	files := extractHDROPFiles(pDataObj)
+	if len(files) == 0 || downgrade == nil {
+		// Nothing to hand off; end the pump. Runs on the STA thread, so posting
+		// to it is safe.
+		call(procPostThreadMessageW, serverThreadID, wmQuit, 0, 0)
+		return sOK
 	}
-	// End the message pump: the selection has been handed off (or there was
-	// nothing to hand off). Runs on the STA thread, so posting to it is safe.
-	call(procPostThreadMessageW, serverThreadID, wmQuit, 0, 0)
+	if serverTimer != nil {
+		serverTimer.Stop() // the conversion sets the pace
+	}
+	workStarted = true
+	go runAndReport(files)
 	return sOK
+}
+
+// runAndReport does the conversion off the STA thread, shows the outcome, and
+// only then ends the pump.
+func runAndReport(files []string) {
+	// MessageBoxW runs a modal message loop on whatever thread calls it, so pin
+	// this goroutine to one OS thread for the duration.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer close(workDone)
+	defer call(procPostThreadMessageW, serverThreadID, wmQuit, 0, 0)
+
+	summary, bad := downgrade(files)
+	showResult(summary, bad)
+}
+
+// showResult puts the outcome in front of the user. It is a variable so the
+// test for the sequence above can capture what would be shown: a real modal box
+// on a CI agent is one nobody will ever dismiss, and the server would hang
+// waiting for it.
+var showResult = func(summary string, failed bool) {
+	icon := uintptr(mbIconInformation)
+	if failed {
+		icon = mbIconError
+	}
+	messageBox(summary, contextMenuTitle, mbOK|icon|mbSetForeground|mbTopmost)
+}
+
+// messageBox shows a modal box and returns which button was pressed. A string
+// that cannot be converted (only possible if it contains a NUL) is dropped
+// rather than reported: this is the path that reports errors, so it has no
+// better channel of its own to fail into.
+func messageBox(text, caption string, flags uintptr) uintptr {
+	textPtr, err := syscall.UTF16PtrFromString(text)
+	if err != nil {
+		return 0
+	}
+	captionPtr, err := syscall.UTF16PtrFromString(caption)
+	if err != nil {
+		return 0
+	}
+	r := call(procMessageBoxW, 0, ptr(textPtr), ptr(captionPtr), flags)
+	// The uintptr conversions above are invisible to the GC, so hold the
+	// buffers until the call has returned.
+	runtime.KeepAlive(textPtr)
+	runtime.KeepAlive(captionPtr)
+	return r
 }
 
 // extractHDROPFiles pulls the selected paths out of the data object Explorer
 // passed to Drop. It asks for CF_HDROP as an HGLOBAL, enumerates the paths with
 // DragQueryFileW, then releases the medium.
 func extractHDROPFiles(pDataObj unsafe.Pointer) []string {
+	if pDataObj == nil {
+		// Explorer should never do this, but reading the vtable off a null
+		// interface pointer would take the whole server down with it, and this
+		// code runs inside a COM callback where a panic has nowhere to go.
+		return nil
+	}
 	fe := formatEtc{cfFormat: cfHDROP, dwAspect: dvaspectContent, lindex: -1, tymed: tymedHGlobal}
 	var med stgMedium
 	dataObj := (*struct{ vtbl *iDataObjectVtbl })(pDataObj)
@@ -320,54 +408,6 @@ func extractHDROPFiles(pDataObj unsafe.Pointer) []string {
 		files = append(files, syscall.UTF16ToString(buf))
 	}
 	return files
-}
-
-// launchDowngradeConsole relaunches prem-down in a brand-new console window to
-// downgrade every selected file. CREATE_NEW_CONSOLE (and leaving the standard
-// handles unset) gives the child a real interactive console, which the "--gui"
-// pause in main() needs to wait on Enter — the activated server itself has no
-// console. The existing batch path in main() then handles per-file success and
-// failure.
-func launchDowngradeConsole(files []string) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	argv := append([]string{exe, "--gui"}, files...)
-
-	appPtr, err := syscall.UTF16PtrFromString(exe)
-	if err != nil {
-		return err
-	}
-	cmdPtr, err := syscall.UTF16PtrFromString(makeCmdLine(argv))
-	if err != nil {
-		return err
-	}
-	var si syscall.StartupInfo
-	si.Cb = uint32(unsafe.Sizeof(si)) //nolint:gosec // G103/G115: STARTUPINFO.cb is its own byte size, which fits a DWORD.
-	var pi syscall.ProcessInformation
-	if err := syscall.CreateProcess(appPtr, cmdPtr, nil, nil, false, createNewConsole, nil, nil, &si, &pi); err != nil {
-		return err
-	}
-	_ = syscall.CloseHandle(pi.Thread)
-	_ = syscall.CloseHandle(pi.Process)
-	return nil
-}
-
-// makeCmdLine joins argv into a command line with each element quoted per the
-// Windows CommandLineToArgvW rules, so paths with spaces survive intact.
-func makeCmdLine(argv []string) string {
-	var b strings.Builder
-	for i, a := range argv {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteString(syscall.EscapeArg(a))
-	}
-	return b.String()
 }
 
 // messagePump runs the STA message loop. In a single-threaded apartment, COM
@@ -399,8 +439,8 @@ func messagePump() {
 // off the selection (or the safety timeout fires), then tears down.
 func runDropTargetServer() {
 	// COM launches this LocalServer as a console-subsystem process, so Windows
-	// hands it a console window it never uses. Hide it up front so the only
-	// window the user sees is the fresh console the downgrade runs in.
+	// hands it a console window it never writes to. Hide it up front so the only
+	// window the user ever sees is the message box.
 	if hwnd := call(procGetConsoleWindow); hwnd != 0 {
 		call(procShowWindow, hwnd, swHide)
 	}
@@ -431,21 +471,33 @@ func runDropTargetServer() {
 	}
 	defer call(procCoRevokeClassObject, uintptr(token))
 
-	timer := time.AfterFunc(serverTimeout, func() {
+	serverTimer = time.AfterFunc(serverTimeout, func() {
 		call(procPostThreadMessageW, serverThreadID, wmQuit, 0, 0)
 	})
-	defer timer.Stop()
+	defer serverTimer.Stop()
 
 	messagePump()
+
+	// The pump ends as soon as WM_QUIT lands, which for a Drop is before the
+	// conversion has finished — and whoever posted it, returning here would exit
+	// the process out from under the worker. Wait for it.
+	if workStarted {
+		<-workDone
+	}
 }
 
 // MaybeRunCOMServer runs the Drop Target server and reports true when prem-down
 // was activated by COM (launched with "-Embedding"); main() then returns
 // without doing any normal CLI parsing.
-func MaybeRunCOMServer(args []string) bool {
+//
+// run is what converts the selection Explorer drops. It is injected because the
+// planning it needs — grouping a mixed selection of projects and Productions —
+// belongs to the command layer, not to this file's Win32 plumbing.
+func MaybeRunCOMServer(args []string, run Downgrader) bool {
 	if !hasEmbeddingArg(args) {
 		return false
 	}
+	downgrade = run
 	runDropTargetServer()
 	return true
 }

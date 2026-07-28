@@ -122,7 +122,10 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 	}
 	// The shell script is spliced into XML: its redirections must arrive
 	// escaped ("2>&1" -> "2&gt;&amp;1") or the plist would be malformed.
-	for _, want := range []string{"com.apple.RunShellScript", "2&gt;&amp;1", "prem-down"} {
+	// "--gui" is the only thing telling prem-down this run came from Finder,
+	// and so the only thing that lets the update check ever ask its question on
+	// macOS.
+	for _, want := range []string{"com.apple.RunShellScript", "2&gt;&amp;1", "prem-down --gui"} {
 		if !strings.Contains(string(doc), want) {
 			t.Errorf("document.wflow missing %q", want)
 		}

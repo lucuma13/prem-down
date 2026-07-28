@@ -32,7 +32,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -94,18 +94,12 @@ func releaseVersion(modVersion string) (string, bool) {
 type cli struct {
 	out io.Writer // normal output (progress, "wrote ...", help)
 	err io.Writer // diagnostics
-	in  io.Reader // stdin; read only by the --gui pause and the update question
+	in  io.Reader // stdin; only ever read by an update-check prompt that wants one
 
-	// stdin is the single buffered view of in, built on first use by reader().
-	stdin *bufio.Reader
-
-	// gui is set by --gui, passed by the OS context-menu wiring, and means
-	// "this run came from the file manager, not a terminal". Two things follow
-	// from it: on Windows the shell opens a console window that closes the
-	// instant the process exits, so wait for Enter before exiting to keep the
-	// result readable (integrate.ConsoleClosesOnExit); and on either platform
-	// this is a surface that can put the update check's one-time question to
-	// the user.
+	// gui means "this run came from the file manager, not a terminal", and marks
+	// it as a surface that can put the update check's one-time question to the
+	// user. It is set by --gui (passed by the Finder Quick Action) and by the
+	// Windows COM handler, which calls run directly rather than through a flag.
 	gui bool
 
 	// updates is the opt-in update check
@@ -129,33 +123,12 @@ func (c *cli) downgrader() *premdown.Downgrader {
 	return &premdown.Downgrader{Out: c.out, Err: c.err}
 }
 
-// reader is the cli's one buffered view of stdin. Everything that prompts goes
-// through it — the update-check question and the --gui pause both can, on the
-// same run — because a second bufio.Reader over the same stream would swallow
-// whatever the first one had already buffered past its own newline. Two
-// prompts sharing one reader can't eat each other's keystrokes.
-func (c *cli) reader() *bufio.Reader {
-	if c.stdin == nil {
-		c.stdin = bufio.NewReader(c.in)
-	}
-	return c.stdin
-}
-
-func (c *cli) pauseIfGUI() {
-	if !c.gui || !integrate.ConsoleClosesOnExit {
-		return
-	}
-	_, _ = fmt.Fprint(c.err, "\nPress Enter to close this window...")
-	_, _ = c.reader().ReadBytes('\n')
-}
-
 // fatal reports a user error and returns the process exit code (1) for the
-// caller to return, pausing first when running under --gui. It replaces the old
-// os.Exit-from-anywhere: run and its helpers thread the code back to main, which
-// is the only place the process actually exits.
+// caller to return. It replaces the old os.Exit-from-anywhere: run and its
+// helpers thread the code back to main, which is the only place the process
+// actually exits.
 func (c *cli) fatal(format string, args ...any) int {
 	_, _ = fmt.Fprintf(c.err, format+"\n", args...)
-	c.pauseIfGUI()
 	return 1
 }
 
@@ -187,6 +160,51 @@ func main() {
 	os.Exit(newCLI().run(os.Args[1:]))
 }
 
+// comDowngrade converts one File Explorer selection for the Windows COM handler
+// and returns the text its message box should show. That activation has no
+// console, so the run's output is collected into buffers — the same injected-
+// stream seam the tests use — and displayed rather than printed.
+//
+// gui is set because a context-menu run is the surface the update check may
+// raise its question on.
+func comDowngrade(files []string) (string, bool) {
+	return dialogRun(updatechecker.New(githubRepo, "prem-down", version), files)
+}
+
+// dialogRun runs files through a cli whose streams are buffers and folds the
+// result into dialog text.
+func dialogRun(updates *updatechecker.Checker, files []string) (string, bool) {
+	var out, errOut bytes.Buffer
+	c := &cli{
+		out:     &out,
+		err:     &errOut,
+		in:      strings.NewReader(""),
+		gui:     true,
+		updates: updates,
+	}
+	failed := c.run(files) != 0
+	return comSummary(out.String(), errOut.String()), failed
+}
+
+// comSummary folds a run's two streams into one block of dialog text: failures
+// first, then what was written.
+func comSummary(stdout, stderr string) string {
+	var b strings.Builder
+	for _, s := range []string{strings.TrimSpace(stderr), strings.TrimSpace(stdout)} {
+		if s == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(s)
+	}
+	if b.Len() == 0 {
+		return "Nothing to downgrade."
+	}
+	return b.String()
+}
+
 // run holds main's logic, split out so it can be tested: it returns the process
 // exit code instead of calling os.Exit, and user-error paths return c.fatal's
 // code rather than exiting mid-stack. main is then a one-line shim.
@@ -194,7 +212,7 @@ func (c *cli) run(args []string) int {
 	// When Explorer activates prem-down as the Drop Target COM server (Windows
 	// only; "-Embedding"), it takes over completely: it collects the selected
 	// files and relaunches prem-down --gui on them. See multi_selection_windows.go.
-	if integrate.MaybeRunCOMServer(args) {
+	if integrate.MaybeRunCOMServer(args, comDowngrade) {
 		return 0
 	}
 	if len(args) > 0 && args[0] == "integrate" {
@@ -289,9 +307,8 @@ func (c *cli) run(args []string) int {
 	// Only after a clean batch: a run that already reported an error is not a
 	// place to ask the user about update checks.
 	if !failed && c.updates != nil {
-		c.updates.Notify(c.out, c.reader(), c.gui)
+		c.updates.Notify(c.out, c.in, c.gui)
 	}
-	c.pauseIfGUI()
 	if failed {
 		return 1
 	}

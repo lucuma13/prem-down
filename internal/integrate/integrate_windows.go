@@ -11,8 +11,9 @@
 // The verb is implemented as a Drop Target, not a plain command: its CLSID
 // resolves to prem-down's own COM LocalServer (this same exe), so selecting
 // several .prproj files and invoking the entry hands the whole selection to a
-// single prem-down process. A command verb ("exe" "%1"), by contrast, makes
-// Explorer launch one process — one console window — per selected file.
+// single prem-down process, which reports on all of them in one message box. A
+// command verb ("exe" "%1"), by contrast, is invoked once per selected file, so
+// a selection would become one process and one message box each.
 //
 // Copyright (c) 2026 Luis Gómez Gutiérrez. License: MIT.
 
@@ -41,13 +42,6 @@ const (
 	// FileManagerName is this platform's file manager (named in the CLI help).
 	FileManagerName = "File Explorer"
 	integrationKind = "a File Explorer context-menu entry"
-
-	// ConsoleClosesOnExit says a run launched from this platform's file manager
-	// gets a console window that vanishes the instant the process exits, so the
-	// CLI has to hold it open to leave the result readable (the --gui pause in
-	// main.go). True here; Finder captures a Quick Action's output and shows it
-	// afterwards instead, so macOS has nothing to hold open.
-	ConsoleClosesOnExit = true
 
 	integrationInstalledMessage = `Installed the File Explorer context-menu entries: right-click a .prproj file,
 (or a .prodset file), and pick "` + contextMenuTitle + `".`
