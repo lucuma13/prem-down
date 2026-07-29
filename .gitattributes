@@ -1,0 +1,5 @@
+# Default for all files
+* text=auto eol=lf
+
+# No EOL conversion (kept byte-exact)
+internal/premdown/testdata/**  -text

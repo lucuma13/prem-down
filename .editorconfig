@@ -24,3 +24,9 @@ indent_size = unset
 [{go.mod,go.sum}]
 indent_style = tab
 indent_size = unset
+
+[internal/premdown/testdata/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
