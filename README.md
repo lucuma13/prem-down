@@ -23,9 +23,9 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 #### Windows
 
-Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "Remove protection and open").
+1. Download the [installer](https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_windows.msi) and open it (if Windows warns about an unknown publisher, choose "Remove protection and open").
 
-Alternatively, install from Terminal: `winget install -e --id lucuma13.prem-down`
+2. Alternatively, install from Terminal: `winget install -e --id lucuma13.prem-down`
 
 ### 📖 Usage
 
@@ -55,17 +55,18 @@ Downgrade a whole Production:
 prem-down MyProduction/MyProduction.prodset
 ```
 
-If the action is ever missing (or you want to remove it before uninstalling), manage it from the Terminal:
+Manage context menu right-click action:
 
 ```sh
-prem-down integrate           # add the right-click action
-prem-down integrate --remove  # remove it
-```
-To uninstall, run this command on Terminal:
-```sh
-prem-down integrate --remove && rm -f /usr/local/bin/prem-down
+prem-down integrate on        # add the right-click action
+prem-down integrate off       # remove it
 ```
 
+Manage automatic update checks:
+```sh
+prem-down updates on          # activate check for updates
+prem-down updates off         # deactivate check for updates
+```
 
 ### 🧪 Feedback & Contributing
 
