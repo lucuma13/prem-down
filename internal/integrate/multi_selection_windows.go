@@ -200,8 +200,8 @@ var (
 
 // formatEtc / stgMedium mirror the Win32 structs; Go inserts the same alignment
 // padding the C layouts have on amd64 (the DVTARGETDEVICE* and hGlobal land on
-// 8-byte offsets). Fields we neither set nor read — the target-device pointer
-// and the fields the shell fills in and ReleaseStgMedium consumes — are blank
+// 8-byte offsets). Fields we neither set nor read - the target-device pointer
+// and the fields the shell fills in and ReleaseStgMedium consumes - are blank
 // so they hold their place in the layout without tripping the unused-field
 // check.
 type formatEtc struct {
@@ -220,7 +220,7 @@ type stgMedium struct {
 }
 
 // setupCOMObjects wires the vtables to Go callbacks. Refcounting is deliberately
-// trivial — AddRef/Release return a constant nonzero so the static objects are
+// trivial - AddRef/Release return a constant nonzero so the static objects are
 // never considered freed; the process controls its own lifetime and exits right
 // after the Drop.
 func setupCOMObjects() {
@@ -250,9 +250,9 @@ func setupCOMObjects() {
 }
 
 // The COM methods take their pointer arguments as typed pointers rather than
-// uintptr so their bodies never convert a uintptr back into a pointer — that
+// uintptr so their bodies never convert a uintptr back into a pointer - that
 // keeps them clean under go vet's unsafeptr check. Scalar-by-value slots (a
-// DWORD grfKeyState, a POINTL pt — 8 bytes, one register slot on amd64) that we
+// DWORD grfKeyState, a POINTL pt - 8 bytes, one register slot on amd64) that we
 // ignore stay as uintptr.
 func comAddRefRelease(_ unsafe.Pointer) uintptr { return 1 }
 
@@ -307,7 +307,7 @@ func dropDragLeave(_ unsafe.Pointer) uintptr { return sOK }
 // straight away, converting on another goroutine: Drop is a blocking
 // out-of-process COM call made from Explorer's own thread, so doing the work
 // inline would freeze the window the user just clicked in for as long as the
-// conversion takes — and could trip COM's "server is busy" dialog.
+// conversion takes - and could trip COM's "server is busy" dialog.
 func dropDrop(_ unsafe.Pointer, pDataObj unsafe.Pointer, _ uintptr, _ uintptr, pdwEffect *uint32) uintptr {
 	*pdwEffect = dropeffectCopy
 	files := extractHDROPFiles(pDataObj)
@@ -477,7 +477,7 @@ func runDropTargetServer() {
 	messagePump()
 
 	// The pump ends as soon as WM_QUIT lands, which for a Drop is before the
-	// conversion has finished — and whoever posted it, returning here would exit
+	// conversion has finished - and whoever posted it, returning here would exit
 	// the process out from under the worker. Wait for it.
 	if workStarted {
 		<-workDone
@@ -489,7 +489,7 @@ func runDropTargetServer() {
 // without doing any normal CLI parsing.
 //
 // run is what converts the selection Explorer drops. It is injected because the
-// planning it needs — grouping a mixed selection of projects and Productions —
+// planning it needs - grouping a mixed selection of projects and Productions -
 // belongs to the command layer, not to this file's Win32 plumbing.
 func MaybeRunCOMServer(args []string, run Downgrader) bool {
 	if !hasEmbeddingArg(args) {
@@ -502,7 +502,7 @@ func MaybeRunCOMServer(args []string, run Downgrader) bool {
 
 // hasEmbeddingArg reports whether COM launched us for activation: it appends
 // "-Embedding" (older shells use "/Embedding") to the LocalServer32 command.
-// The switch prefix is required — a bare "Embedding" is a plausible filename
+// The switch prefix is required - a bare "Embedding" is a plausible filename
 // and must be treated as an ordinary positional argument.
 func hasEmbeddingArg(args []string) bool {
 	for _, a := range args {

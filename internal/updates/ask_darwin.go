@@ -1,8 +1,8 @@
 // The macOS first-run prompt.
 //
-// A run launched from Finder has no terminal to ask in — a Quick Action's
+// A run launched from Finder has no terminal to ask in - a Quick Action's
 // output is captured and shown as a notification once the process has already
-// exited — so the question is raised as an AppleScript dialog.
+// exited - so the question is raised as an AppleScript dialog.
 
 package updates
 

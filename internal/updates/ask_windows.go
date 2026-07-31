@@ -1,7 +1,7 @@
 // The Windows first-run prompt.
 //
-// A run launched from Explorer's context menu has no console — the shell
-// activates the handler as a background COM server — so the question is put in
+// A run launched from Explorer's context menu has no console - the shell
+// activates the handler as a background COM server - so the question is put in
 // a message box, the same way the result is reported.
 //
 // user32 is on Windows' KnownDLLs list, so it always resolves from System32 and

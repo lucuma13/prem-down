@@ -2,7 +2,7 @@
 // older release of Premiere can open them.
 //
 // A downgrade is two things: stamping the target release into the document, and
-// — for 2026 sources — re-inserting the fields 2026's sparser serialisation
+// - for 2026 sources - re-inserting the fields 2026's sparser serialisation
 // drops but older releases require present (see reconstruct.go).
 //
 // The second half is what the well-known trick (gunzip the .prproj, lower the
@@ -38,7 +38,7 @@ import (
 // Out receives progress and the detail printed under verbose; Err receives the
 // per-file diagnostics a Production walk emits when one file fails and the rest
 // continue. They are injected rather than taken from os.Stdout/os.Stderr so the
-// engine never reaches for process globals — the CLI wires the real streams in,
+// engine never reaches for process globals - the CLI wires the real streams in,
 // and a test can read back exactly what was written.
 //
 // A nil writer discards, so the zero Downgrader is usable and silent, which is
@@ -77,7 +77,7 @@ func (d *Downgrader) SawUnrecognisedRelease() bool { return d.unrecognised }
 // stable attribute order: ObjectID="1" is written before Version= in the
 // <Project> tag (true of every release in the version map). If Adobe ever
 // reordered those attributes this would stop matching and the file would be
-// reported as unrecognised — a hard refusal, never a silently incorrect rewrite.
+// reported as unrecognised - a hard refusal, never a silently incorrect rewrite.
 var projectVersionRe = regexp.MustCompile(`(<Project ObjectID="1"[^>]*\bVersion=")(\d+)(")`)
 
 func setProjectVersion(xml string, version int) (string, error) {
@@ -104,7 +104,7 @@ func getProjectVersion(xml string) (int, error) {
 // -1/-2/-3... suffix inserted before the extension. Only a successful Stat
 // counts as taken: any Stat error (not just not-exist) treats the path as free,
 // so an unreadable directory surfaces as a write error later instead of looping
-// here forever. This check is advisory — the O_EXCL open in writeNew (and the
+// here forever. This check is advisory - the O_EXCL open in writeNew (and the
 // exclusive os.Mkdir for a Production's output folder) is what actually
 // guarantees nothing existing is overwritten if something claims the name in
 // between.
@@ -182,9 +182,9 @@ func writeNew(dst string, data []byte, perm os.FileMode) error {
 
 // notOlderError reports that the requested target is not below the source's own
 // version. On a lone file this is user error and the message says so. Inside a
-// Production it is routine — the target is resolved once from the .prodset and
+// Production it is routine - the target is resolved once from the .prodset and
 // applied to every project, so a project already at or below it simply needs
-// copying through — which is why the caller has to be able to tell this apart
+// copying through - which is why the caller has to be able to tell this apart
 // from a real failure.
 type notOlderError struct{ target, source int }
 
@@ -216,7 +216,7 @@ func (d *Downgrader) warnUnrecognised(src string, sourceVersion int) {
 // Version for a source at sourceVersion. A request of 0 means "auto": take the
 // release one step below the source, which is the default when no --to is
 // given. Anything else is checked against the source, because this is a
-// downgrader — an explicit --to at or above the source release is almost
+// downgrader - an explicit --to at or above the source release is almost
 // certainly user error, so refuse rather than stamp a higher version.
 //
 // src names the file being resolved, for the unrecognised-release warning only.
@@ -293,8 +293,8 @@ func verifyDowngraded(xml string, wantVersion int, reinserted bool) error {
 
 // Downgrade converts one project file and returns an error rather than exiting,
 // so a caller processing several files can report a failure and move on to the
-// rest. Every failure is per-file — operational ones (unreadable file,
-// out-of-range target, write failure) and genuinely malformed XML alike — so
+// rest. Every failure is per-file - operational ones (unreadable file,
+// out-of-range target, write failure) and genuinely malformed XML alike - so
 // one corrupt project in a batch never aborts the remaining files.
 func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool) error {
 	raw, err := readMaybeGzip(src)

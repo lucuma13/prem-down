@@ -302,7 +302,7 @@ func TestLatestRejectsBadResponses(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Notify — consent first, then the throttle, then the notice.
+// Notify - consent first, then the throttle, then the notice.
 // --------------------------------------------------------------------------
 
 // Without a surface to ask on, an unset setting stays unset: no question, no
@@ -347,7 +347,7 @@ func TestNotifyRemembersNo(t *testing.T) {
 	}
 }
 
-// Accepting checks straight away — LastChecked starts zero — and reports the
+// Accepting checks straight away - LastChecked starts zero - and reports the
 // newer release with the upgrade hint.
 func TestNotifyAcceptsAndReports(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
@@ -437,7 +437,7 @@ func TestNotifyQuietWhenCurrent(t *testing.T) {
 	}
 }
 
-// Unreadable settings mean silence — never a re-ask, never an unconsented
+// Unreadable settings mean silence - never a re-ask, never an unconsented
 // request, and never an error on top of a run that already succeeded.
 func TestNotifyIgnoresUnreadableSettings(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
@@ -529,7 +529,7 @@ func TestNotifyStopsWhenTheAnswerCannotBeSaved(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Command — the terminal way in and out.
+// Command - the terminal way in and out.
 // --------------------------------------------------------------------------
 
 func TestCommand(t *testing.T) {
@@ -607,7 +607,7 @@ func TestCommandReportsAFailedSave(t *testing.T) {
 }
 
 // Once a check has actually run, status reports when it happened and what it
-// found — the two facts that explain why (or why not) a notice is appearing.
+// found - the two facts that explain why (or why not) a notice is appearing.
 func TestCommandStatusReportsTheLastCheck(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	checked := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
@@ -638,8 +638,8 @@ func TestCommandReportsUnreadableSettings(t *testing.T) {
 	}
 }
 
-// A build whose version cannot be compared — an unstamped `go build`, or the
-// `git describe` string a working-tree build carries — is inert: no question,
+// A build whose version cannot be compared - an unstamped `go build`, or the
+// `git describe` string a working-tree build carries - is inert: no question,
 // no request, no notice. Nothing useful could come of one, and a developer
 // building off their own tree is already at or past the release they'd be told
 // to install.

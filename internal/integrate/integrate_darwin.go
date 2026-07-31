@@ -1,7 +1,7 @@
 // macOS implementation of the "integrate" subcommand: a Finder Quick Action.
 //
-// A Quick Action is an Automator .workflow bundle in ~/Library/Services — two
-// plists plus a template-image TIFF, no compiled code — so it can be written
+// A Quick Action is an Automator .workflow bundle in ~/Library/Services - two
+// plists plus a template-image TIFF, no compiled code - so it can be written
 // directly and needs no code signing. Its shell step resolves prem-down through
 // the Homebrew bin dirs at run time (not an absolute Cellar/Caskroom path), so
 // it survives upgrades of the cask untouched.
@@ -26,7 +26,7 @@
 // filter by extension on the shell step (which explains itself via a dialog
 // when handed the wrong file).
 //
-// It accepts .prodset — a Production's settings file — alongside .prproj, which
+// It accepts .prodset - a Production's settings file - alongside .prproj, which
 // is how Productions are reached. Productions are folders, but the action is
 // deliberately NOT offered on folders: NSSendFileTypes filters by type only, so
 // public.folder would put the action on every folder on the machine with no
@@ -45,7 +45,7 @@ import (
 )
 
 // quickActionIcon is the template TIFF the Quick Action shows in Finder's
-// right-click menu — a committed asset (a multi-resolution, "Template"-named
+// right-click menu - a committed asset (a multi-resolution, "Template"-named
 // TIFF, so macOS tints it to match native icons).
 //
 //go:embed workflowCustomImageTemplate.tiff
@@ -413,7 +413,7 @@ func installIntegration() error {
 var enableServiceMenu = enableQuickAction
 
 // disableServiceMenu is the seam removeIntegration uses to switch the Quick
-// Action off — the mirror of enableServiceMenu, and a variable for the same
+// Action off - the mirror of enableServiceMenu, and a variable for the same
 // test reason: the real implementation writes the per-user `pbs` domain.
 var disableServiceMenu = disableQuickAction
 
@@ -430,7 +430,7 @@ func serviceStatusKey() string {
 //
 // The state lives in the per-user `pbs` preference domain, whose key for a
 // workflow service begins with "(null)". `defaults -dict-add` cannot write a
-// key starting with "(" — it parses it as an old-style plist array — so the
+// key starting with "(" - it parses it as an old-style plist array - so the
 // edit is done on a temp copy: export the domain, splice our entry in with
 // plutil (which addresses the parenthesized key fine), import it back. Export
 // and import both go through cfprefsd, so there is no cache race with a direct

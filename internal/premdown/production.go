@@ -1,7 +1,7 @@
 // Premiere Pro Production support.
 //
 // A Production is a folder, not a file: it holds exactly one .prodset settings
-// file plus any number of .prproj files. Membership is implicit — every .prproj
+// file plus any number of .prproj files. Membership is implicit - every .prproj
 // under the folder belongs to the Production.
 //
 // A Production downgrade mirrors the whole folder to a sibling
@@ -41,7 +41,7 @@ const (
 const (
 	// Productions were introduced on 14 April 2020. Older releases have no
 	// concept of a Production at all, so stamping one down to them produces a
-	// folder no Premiere will ever open — refused rather than written.
+	// folder no Premiere will ever open - refused rather than written.
 	firstProductionProjectVersion = 38
 
 	// 2026 switched the .prodset to UTF-8, 2025 writes UTF-16LE (and we assume
@@ -56,7 +56,7 @@ const (
 // The rewrite is textual, for the same reason the .prproj path uses regexes.
 // Re-encoding through encoding/json would reorder nothing (Go sorts map keys
 // and Adobe already writes them sorted) but it would re-escape the embedded XML
-// blobs — Go escapes <, > and & as < and friends — producing a file that is
+// blobs - Go escapes <, > and & as < and friends - producing a file that is
 // semantically equal and byte-wise unrecognisable. Parsing is still used, to
 // validate that the input really is a .prodset and to verify the result.
 var (
@@ -72,7 +72,7 @@ type prodsetVersions struct {
 }
 
 // The encoding is not cosmetic. Handed a UTF-8 settings file, 2025 reports
-// "invalid settings" and offers to overwrite it with defaults — which discards
+// "invalid settings" and offers to overwrite it with defaults - which discards
 // the users settings for scratch disk, ingest and project settings.
 //
 // Everything else 2026 writes is tolerated: the 2026-only
@@ -161,7 +161,7 @@ func readProdset(src string) (string, prodsetVersions, error) {
 // otherwise write a Production that cannot open, so nothing is written.
 //
 // It takes the encoded bytes, so the re-parse also proves the encoding
-// round-trips — a document that decodes back to something other than what we
+// round-trips - a document that decodes back to something other than what we
 // stamped is caught here rather than on the user's disk.
 func verifyProdset(out []byte, wantVersion int) error {
 	js, err := decodeProdset(out)
@@ -228,8 +228,8 @@ func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbo
 
 // checkProductionTarget refuses a target older than the first release that
 // understood Productions. Reached two ways: an explicit --to naming a
-// pre-Productions release, and — since the auto target is one release below the
-// source — a Production already at the floor (2020.1), whose auto target lands
+// pre-Productions release, and - since the auto target is one release below the
+// source - a Production already at the floor (2020.1), whose auto target lands
 // one step below it. That second case is a Production that simply cannot be
 // downgraded: it is already the oldest release Productions exist in.
 func checkProductionTarget(projectVersion int) error {
@@ -268,7 +268,7 @@ func findProdset(dir string) (string, error) {
 }
 
 // copyFile reproduces one file verbatim at dst. Used for everything in a
-// Production that is not a project file — media, previews, autosaves, caches —
+// Production that is not a project file - media, previews, autosaves, caches -
 // so links stored relative to the Production folder still resolve in the copy.
 func copyFile(src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src) //nolint:gosec // G304: src is inside the user-supplied Production folder; copying it is the tool's purpose
@@ -319,7 +319,7 @@ func (d *Downgrader) productionTarget(prodset string, requested int, verbose boo
 // other forty. If anything did fail the function returns an error, because the
 // resulting folder is an incomplete Production and must not be presented as a
 // finished one. The partial folder is deliberately left on disk rather than
-// deleted — it may hold gigabytes of successfully copied media, and it is
+// deleted - it may hold gigabytes of successfully copied media, and it is
 // clearly named, so what to do with it is the user's call.
 func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion int, verbose bool) error {
 	prodset, err := findProdset(srcDir)

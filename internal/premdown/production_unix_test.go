@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// A Production holds projects, media and settings — never a pipe, socket or
+// A Production holds projects, media and settings - never a pipe, socket or
 // device. One found in the tree has nothing meaningful to copy, so it is
 // skipped with a warning rather than copied (which would block on the pipe) or
 // counted as a failure (nothing about the user's Production is broken).

@@ -15,8 +15,8 @@
 //	prem-down updates [on|off]                    # update check
 //
 // This file is the CLI shell only: stream plumbing, argument parsing, and
-// turning the positional arguments into jobs. How a downgrade actually works —
-// including what Premiere 2026 changed — is documented on the internal/premdown
+// turning the positional arguments into jobs. How a downgrade actually works -
+// including what Premiere 2026 changed - is documented on the internal/premdown
 // package.
 package main
 
@@ -51,7 +51,7 @@ var version = "dev"
 // init recovers the version for `go install <module>/cmd/prem-down@vX.Y.Z`,
 // which applies no ldflags and would otherwise leave the binary reporting
 // "dev". Go records the module version it resolved in the binary's build info,
-// so that install path can report the release it actually is — and take part in
+// so that install path can report the release it actually is - and take part in
 // the update check, which ignores versions it cannot compare.
 func init() {
 	if version != "dev" {
@@ -67,7 +67,7 @@ func init() {
 // releaseVersion normalises a module version into the form prem-down reports,
 // reporting false for anything that is not a real release. A build from a
 // working tree records a pseudo-version ("v0.0.0-20260727225736-31d8679+dirty")
-// rather than a tag, and that has to keep reading as "dev" — it is not a
+// rather than a tag, and that has to keep reading as "dev" - it is not a
 // release, and claiming otherwise would both misreport --version and invite the
 // update check to compare against it.
 //
@@ -84,7 +84,7 @@ func releaseVersion(modVersion string) (string, bool) {
 // cli carries the process's IO streams and the --gui flag so the command logic
 // writes through injected streams instead of the os.Stdout/os.Stderr/os.Stdin
 // globals. Tests construct a cli over bytes.Buffers and call run/downgrade
-// directly — no pipe redirection, no process-exit seam, no global save/restore.
+// directly - no pipe redirection, no process-exit seam, no global save/restore.
 type cli struct {
 	out io.Writer // normal output (progress, "wrote ...", help)
 	err io.Writer // diagnostics
@@ -111,7 +111,7 @@ func newCLI() *cli {
 }
 
 // downgrader hands the engine this cli's streams, so engine progress and
-// per-file diagnostics land wherever the CLI's output is pointed — the real
+// per-file diagnostics land wherever the CLI's output is pointed - the real
 // process streams in main, in-memory buffers under test.
 func (c *cli) downgrader() *premdown.Downgrader {
 	return &premdown.Downgrader{Out: c.out, Err: c.err}
@@ -150,8 +150,8 @@ func main() {
 
 // comDowngrade converts one File Explorer selection for the Windows COM handler
 // and returns the text its message box should show. That activation has no
-// console, so the run's output is collected into buffers — the same injected-
-// stream seam the tests use — and displayed rather than printed.
+// console, so the run's output is collected into buffers - the same injected-
+// stream seam the tests use - and displayed rather than printed.
 //
 // gui is set because a context-menu run is the surface the update check may
 // raise its question on.
@@ -327,7 +327,7 @@ func (c *cli) run(args []string) int {
 // The custom path is opt-in only and silent otherwise, which is why a nil
 // result falls through to Notify rather than ending the run: a user who has
 // never been asked should still meet the first-run question on a surface that
-// can put it. Only one of the two ever prints — they would otherwise say the
+// can put it. Only one of the two ever prints - they would otherwise say the
 // same thing twice.
 //
 // The unrecognised-release notice goes to c.err, next to the warning it
@@ -336,7 +336,7 @@ func (c *cli) notifyUpdates(unrecognised bool) {
 	if unrecognised {
 		if u := c.checker.CheckNow(); u != nil {
 			_, _ = fmt.Fprintf(c.err, "\nA newer prem-down (%s) is available and may recognise that "+
-				"release — worth downgrading again with it. %s: %s\n", u.Version, u.Verb, u.Target)
+				"release - worth downgrading again with it. %s: %s\n", u.Version, u.Verb, u.Target)
 			return
 		}
 	}
@@ -354,7 +354,7 @@ type job struct {
 // unusable inputs as it goes.
 //
 // Three things reach this function as "a Production": the folder itself, and
-// the .prodset inside it — which is what the file manager's right-click entry
+// the .prodset inside it - which is what the file manager's right-click entry
 // is wired to, since there is no way to put a menu entry on Production folders
 // alone without putting it on every folder on the machine.
 //

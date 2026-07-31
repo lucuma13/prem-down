@@ -1,7 +1,7 @@
 // Package updates is a portable, opt-in GitHub release update checker.
 //
 // It asks once whether to look for new releases, remembers the answer forever,
-// and — if the answer was yes — contacts GitHub's "latest release" API to
+// and - if the answer was yes - contacts GitHub's "latest release" API to
 // report that a newer version exists. It is notify-only: a one-line notice
 // naming the right upgrade command is the whole feature.
 package updates
@@ -45,7 +45,7 @@ const DefaultCommandName = "updates"
 //
 // The request is synchronous on purpose. An abandon-on-timeout goroutine would
 // be cheaper, but the answer has to reach the same window that reports the
-// run's result, and the process exits straight after — there is no later run
+// run's result, and the process exits straight after - there is no later run
 // for a late answer to land in.
 const requestTimeout = 3 * time.Second
 
@@ -98,7 +98,7 @@ func (c *Checker) configPath() (string, error) {
 	return filepath.Join(dir, c.Product, "config.json"), nil
 }
 
-// load returns the stored settings. A missing file is not an error — it is the
+// load returns the stored settings. A missing file is not an error - it is the
 // normal state before the question has ever been asked, and reads as the zero
 // value (stateUnset). Anything else is returned as an error, and Notify treats
 // that as "do nothing": settings that cannot be read must never cause a re-ask,
@@ -200,7 +200,7 @@ func (c *Checker) latest() (string, error) {
 }
 
 // parseVersion parses "1.2.3" (an optional leading "v" is accepted) into its
-// numeric fields. nil means "cannot compare, stay quiet" — e.g. a dev build
+// numeric fields. nil means "cannot compare, stay quiet" - e.g. a dev build
 // stamped by git describe ("v0.1-3-gabc123-dirty") or the literal "dev".
 func parseVersion(s string) []int {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
@@ -220,8 +220,8 @@ func parseVersion(s string) []int {
 }
 
 // Comparable reports whether a version string is one this package can compare:
-// a plain numeric release like "1.2.3" or "v1.2.3". Anything else — "dev", a
-// `git describe` string, a module pseudo-version — is a development build, and
+// a plain numeric release like "1.2.3" or "v1.2.3". Anything else - "dev", a
+// `git describe` string, a module pseudo-version - is a development build, and
 // a Checker holding one stays silent rather than guess at a comparison.
 //
 // Exported so a host deciding which version string to report can apply exactly

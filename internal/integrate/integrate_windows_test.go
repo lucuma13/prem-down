@@ -45,7 +45,7 @@ func TestContextMenuRegAdds(t *testing.T) {
 		}
 	}
 	// Every file type needs its own verb, and all of them must resolve to the
-	// single handler — otherwise one of the two menu entries does nothing.
+	// single handler - otherwise one of the two menu entries does nothing.
 	if dropTargets != len(contextMenuKeys) {
 		t.Errorf("got %d DropTarget\\CLSID reg adds, want %d", dropTargets, len(contextMenuKeys))
 	}

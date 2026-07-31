@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// The Services-database entry must be keyed exactly as pbs expects — a
-// workflow service has no bundle id, so the key starts with "(null)" — and the
+// The Services-database entry must be keyed exactly as pbs expects - a
+// workflow service has no bundle id, so the key starts with "(null)" - and the
 // enabled-status value must be well-formed JSON that turns both Finder menus
 // on, or the auto-enable silently registers a disabled (or malformed) entry.
 func TestServiceEnableStatus(t *testing.T) {
@@ -170,7 +170,7 @@ func TestInstallAndRemoveIntegration(t *testing.T) {
 }
 
 // The Quick Action lives under the user's home directory, so a run that cannot
-// work out where that is — or cannot create the bundle there — has to say so
+// work out where that is - or cannot create the bundle there - has to say so
 // and exit non-zero. Both directions of the subcommand report it; neither
 // claims to have installed or removed anything.
 func TestIntegrateReportsAFailureToWriteTheBundle(t *testing.T) {
@@ -208,9 +208,9 @@ func TestIntegrateReportsAFailureToWriteTheBundle(t *testing.T) {
 	}
 }
 
-// A bundle that already exists but cannot be written into — the shape an
+// A bundle that already exists but cannot be written into - the shape an
 // install left behind by a privileged installer takes for the user's own later
-// run — fails on the file it could not write instead of leaving a half-built
+// run - fails on the file it could not write instead of leaving a half-built
 // Quick Action that Finder would try to load.
 func TestInstallIntegrationReportsAWriteFailure(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -244,7 +244,7 @@ func TestInstallIntegrationReportsAWriteFailure(t *testing.T) {
 }
 
 // MaybeRunCOMServer is the Windows Drop Target activation hook. On macOS the
-// Quick Action invokes prem-down directly, so it must never claim a run —
+// Quick Action invokes prem-down directly, so it must never claim a run -
 // whatever the arguments look like.
 func TestMaybeRunCOMServerNeverClaimsARunOnMacOS(t *testing.T) {
 	for _, args := range [][]string{nil, {"-Embedding"}, {"a.prproj"}} {

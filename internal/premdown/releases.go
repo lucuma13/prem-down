@@ -17,7 +17,7 @@ import (
 // Releases above it write the sparse form; releases at or below it refuse to
 // open a project that arrives in that form. So it is the boundary in BOTH
 // directions, and which side each end of a conversion falls on is what decides
-// whether field re-insertion is needed at all — see needsFieldReinsertion.
+// whether field re-insertion is needed at all - see needsFieldReinsertion.
 const lastDenseSerialisationProjectVersion = 43
 
 // Map of Premiere release -> the XML <Project> Version that release uses

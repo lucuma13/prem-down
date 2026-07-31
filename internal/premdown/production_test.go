@@ -54,7 +54,7 @@ func writeFile(t *testing.T, path, content string) string {
 }
 
 // A .prin is Premiere's gzip-compressed sidecar that sits next to a .prproj. It
-// is not a project, so a Production downgrade must copy it verbatim — and the
+// is not a project, so a Production downgrade must copy it verbatim - and the
 // gzip magic in its first bytes must NOT trip the .prproj gzip path (that path
 // is reached by extension, never by sniffing). The leading 1f 8b here guards
 // exactly that: a gzip-magic sidecar copied byte-for-byte, not decompressed.
@@ -123,7 +123,7 @@ func TestDowngradeProdsetChangesOnlyTheVersionKeys(t *testing.T) {
 // The inline prodset2026 is a reduced sample; this runs the same
 // "only-the-version-keys-move" guarantee against a real 2026 .prodset saved by
 // Premiere (paths sanitised), which carries the large embedded settings blobs
-// the sample omits — the exact bytes a JSON re-encode would mangle.
+// the sample omits - the exact bytes a JSON re-encode would mangle.
 func TestDowngradeProdsetRealFixtureChangesOnlyVersionKeys(t *testing.T) {
 	fixture := filepath.Join("testdata", "fixture_prproduction.prodset")
 	if _, err := os.Stat(fixture); err != nil {
@@ -150,7 +150,7 @@ func TestDowngradeProdsetRealFixtureChangesOnlyVersionKeys(t *testing.T) {
 }
 
 // The compatibility floor is lowered to let the target release in, but a
-// Production that already declares a wider range keeps it — raising the floor
+// Production that already declares a wider range keeps it - raising the floor
 // would lock out releases that could previously open it.
 func TestDowngradeProdsetNeverRaisesCompatibilityFloor(t *testing.T) {
 	dir := t.TempDir()
@@ -367,7 +367,7 @@ func TestVerifyProdsetRefusesAnUnopenableResult(t *testing.T) {
 
 // copyFile is what keeps a Production's media and sidecars intact, so its
 // failures have to surface: an unreadable source, a destination name claimed
-// since it was picked, and a copy that dies mid-way — the last leaving no
+// since it was picked, and a copy that dies mid-way - the last leaving no
 // half-written file next to the good ones.
 func TestCopyFileFailures(t *testing.T) {
 	dir := t.TempDir()
@@ -386,7 +386,7 @@ func TestCopyFileFailures(t *testing.T) {
 	}
 
 	// A directory opens but cannot be read, which fails the copy itself rather
-	// than the open — the path that has to clean up after itself.
+	// than the open - the path that has to clean up after itself.
 	if runtime.GOOS == "windows" {
 		t.Skip("reading a directory handle is not an error on Windows")
 	}
@@ -447,7 +447,7 @@ func TestDowngradeProductionMirrorsWholeFolder(t *testing.T) {
 
 // Premiere identifies a Production by the .prodset whose basename matches the
 // folder, so the mirrored settings file must be renamed to track the renamed
-// output folder — otherwise Premiere does not recognise the copy as a
+// output folder - otherwise Premiere does not recognise the copy as a
 // Production. The original name must not survive alongside it.
 func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 	src := newProduction(t, "MyProduction")
@@ -477,7 +477,7 @@ func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 }
 
 // Every file in a Production is stamped with one version, taken from the
-// settings file — not resolved per project. A project that is already at or
+// settings file - not resolved per project. A project that is already at or
 // below that version has nothing to downgrade and must still be copied through,
 // or the mirrored Production would be missing a project.
 func TestDowngradeProductionCopiesAlreadyOldProjects(t *testing.T) {
@@ -519,7 +519,7 @@ func TestProductionAtFloorRefusesAutoTarget(t *testing.T) {
 
 // Productions arrived in Premiere Pro 14.1 (April 2020) = version 38. Older
 // releases cannot open one at all, so stamping down to them would produce a
-// folder no Premiere will ever read — refused (before the output folder is
+// folder no Premiere will ever read - refused (before the output folder is
 // created).
 func TestProductionRefusesTargetsPredatingProductions(t *testing.T) {
 	src := newProduction(t, "Old")
@@ -605,7 +605,7 @@ func TestDowngradeProductionReportsPartialFailure(t *testing.T) {
 }
 
 // A folder that is not a Production at all is refused before anything is
-// created, and so is an output folder that already exists — the mirror must
+// created, and so is an output folder that already exists - the mirror must
 // never be merged into something already on disk.
 func TestDowngradeProductionRefusesBadEndpoints(t *testing.T) {
 	empty := t.TempDir()
@@ -627,7 +627,7 @@ func TestDowngradeProductionRefusesBadEndpoints(t *testing.T) {
 }
 
 // The target is resolved once, from the settings file, so a --to at or above
-// the Production's own version is refused there — before the output folder
+// the Production's own version is refused there - before the output folder
 // exists, and without each project getting a chance to pick its own answer.
 func TestDowngradeProductionRefusesTargetNotBelowTheSettings(t *testing.T) {
 	src := newProduction(t, "NotBelow")
@@ -670,7 +670,7 @@ func TestDowngradeProductionReportsANestedProdset(t *testing.T) {
 // Directory permissions are the one thing that makes an individual entry of the
 // mirror fail while everything around it succeeds, which is exactly the
 // keep-going contract. A source folder the copy cannot be written into fails
-// every kind of entry it holds — a plain file, a subfolder, a symlink — and a
+// every kind of entry it holds - a plain file, a subfolder, a symlink - and a
 // source folder that cannot be read fails at the walk. All of it is reported
 // per-file, and the rest of the Production is still mirrored.
 func TestDowngradeProductionReportsUnwritableEntries(t *testing.T) {
@@ -684,7 +684,7 @@ func TestDowngradeProductionReportsUnwritableEntries(t *testing.T) {
 	writeFile(t, filepath.Join(readOnly, "media.mov"), "frames")
 	writeFile(t, filepath.Join(readOnly, "inner", "clip.mov"), "more frames")
 	// Already below the target, so this one is copied through rather than
-	// converted — the other way a file in there reaches copyFile.
+	// converted - the other way a file in there reaches copyFile.
 	writeFile(t, filepath.Join(readOnly, "old"+PrprojExt),
 		strings.Replace(prodProject, `Version="45"`, `Version="41"`, 1))
 	if err := os.Symlink("media.mov", filepath.Join(readOnly, "link.mov")); err != nil {

@@ -18,7 +18,7 @@ import (
 // damaged, so we re-insert them.
 //
 // This set is deliberately narrow and was established by ablation. Only
-// VideoComponentParam's LowerBound and UpperBound are required — removing
+// VideoComponentParam's LowerBound and UpperBound are required - removing
 // either crashes 2025. Every other field 2026 omits was verified
 // presence-optional: all IsTimeVarying, every ParameterControlType, the
 // VideoTransition and AudioTransition defaults, and the TimeComponentParam
@@ -52,7 +52,7 @@ type fieldKey struct{ tag, field string }
 // them and repopulates each parameter's real default bound from its effect
 // definition. This was verified by round-tripping two independent projects
 // through 2025 (downgrade -> open -> re-save) and diffing the re-saved bounds
-// against natively-saved 2025 output — they match exactly.
+// against natively-saved 2025 output - they match exactly.
 //
 // The specific tokens are load-bearing: 2025 treats a numeric value as an
 // explicit override and keeps it, silently corrupting the parameter's range;
@@ -66,14 +66,14 @@ type classField struct{ classID, field string }
 
 // Per-ClassID overrides for the value inserted, consulted before
 // reconstructDefaults. Needed for the rare parameter class whose real bound is
-// NOT one 2025 recomputes from the false/true sentinel — there the sentinel
+// NOT one 2025 recomputes from the false/true sentinel - there the sentinel
 // would round-trip to the wrong value, so we insert the literal instead.
 //
 // The only known case is the Lumetri Color selector param class, whose
 // UpperBound is the "unbounded" marker (2^64-1). Inserting true there makes
 // 2025 collapse it to 1; inserting the literal marker is preserved by 2025 and
 // the project still opens (both verified by round-trip). The color value itself
-// lives in the keyframes and is unaffected either way — this only restores the
+// lives in the keyframes and is unaffected either way - this only restores the
 // declared range. ClassID identifies the parameter's type and is stable across
 // projects.
 var reconstructClassOverrides = map[classField]string{
@@ -92,7 +92,7 @@ var classIDRe = regexp.MustCompile(`\bClassID="([^"]+)"`)
 // serialiser actually emits. In particular it assumes no raw '>' inside
 // attribute values (legal XML, but Premiere escapes it) and no CDATA
 // sections. A document that breaks those assumptions tokenises incorrectly
-// and surfaces as an unbalanced/mismatched-XML error for that file — never as a
+// and surfaces as an unbalanced/mismatched-XML error for that file - never as a
 // silently corrupted output.
 // --------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ import (
 )
 
 // The dialog is the one part of this package that cannot be exercised in
-// process — running it puts a window on the screen and waits for a human. What
+// process - running it puts a window on the screen and waits for a human. What
 // can be checked without that is that the AppleScript is valid, which is where
 // the real risk is: a typo in "cancel button" or "giving up after" would only
 // show up as a silently declined prompt on a user's machine, since ask treats

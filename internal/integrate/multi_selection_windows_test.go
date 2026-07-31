@@ -71,7 +71,7 @@ func TestDropTargetServerSurvivesRegistration(t *testing.T) {
 	cmd := exec.Command(exe, "-test.run=^TestDropTargetServerHelper$", "-test.v") //nolint:gosec // G204: exe is os.Executable(), this test binary re-invoking itself, not external input
 	cmd.Env = append(os.Environ(), "PREM_DOWN_COM_HELPER=1")
 	// No console window for the child: runDropTargetServer hides its console,
-	// and without this it would inherit — and hide — the developer's terminal.
+	// and without this it would inherit - and hide - the developer's terminal.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -91,7 +91,7 @@ func TestDropTargetServerSurvivesRegistration(t *testing.T) {
 
 // runAndReport is the whole Drop-side sequence: convert the selection, report
 // it, and release the server. Every part of it is exercised here except the
-// MessageBoxW call itself — the presenter is swapped out, because a modal box
+// MessageBoxW call itself - the presenter is swapped out, because a modal box
 // on a CI agent is one nobody will ever dismiss.
 //
 // The sequence matters as much as the pieces: runDropTargetServer waits on
@@ -129,7 +129,7 @@ func TestRunAndReport(t *testing.T) {
 				t.Errorf("downgrader got %v, want %v", gotFiles, want)
 			}
 			// Exactly one report for the whole selection, however many files it
-			// held — that is the point of receiving the drop as one call rather
+			// held - that is the point of receiving the drop as one call rather
 			// than letting Explorer invoke a command verb per file.
 			if shown != 1 {
 				t.Fatalf("the outcome was reported %d times, want exactly 1", shown)

@@ -22,7 +22,7 @@ import (
 
 // testCLI is a cli whose streams are in-memory buffers, so a test can drive
 // run/downgrade/integrate directly (the cli methods are promoted) and inspect
-// exactly what was written — no pipe redirection, process-exit seam, or global
+// exactly what was written - no pipe redirection, process-exit seam, or global
 // save/restore. out and err shadow the embedded writers with their concrete
 // buffer type so a test can read them back.
 type testCLI struct {
@@ -44,7 +44,7 @@ func newTestCLI(t *testing.T, stdin string) *testCLI {
 	out, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
 	// A fixed release-shaped version, not the build's own: the real one is "dev"
 	// unless ldflags stamp it, and the checker treats an uncomparable version as
-	// a dev build and does nothing — which would silently neuter these tests.
+	// a dev build and does nothing - which would silently neuter these tests.
 	checker := updates.New(githubRepo, "prem-down", "1.0.0")
 	checker.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	checker.Ask = func(string, io.Reader, io.Writer) bool { return false }
@@ -69,13 +69,13 @@ func TestUsage(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// run() — the CLI arg parser and dispatch, driven over an in-memory cli.
+// run() - the CLI arg parser and dispatch, driven over an in-memory cli.
 //
 // Because run/fatal write through the cli's injected streams and thread the
 // exit code back to main (rather than calling os.Exit mid-stack), every fatal
 // branch and the whole run() arg parser is reachable in-process: build a cli
 // over buffers with newTestCLI, call run, and read the code and the captured
-// output back directly — no pipe, panic seam, or global swapping.
+// output back directly - no pipe, panic seam, or global swapping.
 // --------------------------------------------------------------------------
 
 func TestRunHelpAndVersion(t *testing.T) {
@@ -366,7 +366,7 @@ func TestPlanAcceptsMultipleProductions(t *testing.T) {
 	}
 }
 
-// Naming the folder and its settings file together is one Production, not two —
+// Naming the folder and its settings file together is one Production, not two -
 // otherwise the second pass would write a redundant "_downgraded-1" copy.
 func TestPlanDeduplicatesFolderAndProdset(t *testing.T) {
 	src := newProduction(t, "Dup")
@@ -396,8 +396,8 @@ func TestRunDowngradesProductionFromProdsetArgument(t *testing.T) {
 		t.Fatalf("run should succeed, got code=%d\n%s", code, c.err)
 	}
 	dst := src + "_downgraded"
-	// The settings land in the encoding the target release reads — UTF-16LE for
-	// anything before 2026 — so the stamped key is matched in that form.
+	// The settings land in the encoding the target release reads - UTF-16LE for
+	// anything before 2026 - so the stamped key is matched in that form.
 	settings := readFile(t, filepath.Join(dst, filepath.Base(dst)+premdown.ProdsetExt))
 	if want := utf16le(`"mProjectVersion":43`); !strings.Contains(settings, want) {
 		t.Errorf("auto target should be 2025 (43), UTF-16LE encoded: %q", settings)
@@ -457,7 +457,7 @@ func writeProject(t *testing.T, dir, name string) string {
 	return path
 }
 
-// run dispatches "updates" the same way it dispatches "integrate" — before
+// run dispatches "updates" the same way it dispatches "integrate" - before
 // any flag parsing, so the word is never mistaken for an input file.
 func TestRunDispatchesUpdates(t *testing.T) {
 	c := newTestCLI(t, "")
@@ -478,7 +478,7 @@ func TestRunDispatchesUpdates(t *testing.T) {
 
 // newCLI and dialogRun both wire a checker, so a nil one never reaches run in a
 // shipped build; the guard is there so a missing checker is reported rather
-// than dereferenced — a panic on the COM path surfaces as an empty message box.
+// than dereferenced - a panic on the COM path surfaces as an empty message box.
 // Reporting it also beats letting the word fall through to the flag parser,
 // which would collect it as a positional and call it a missing project file.
 func TestRunUpdatesWithoutAChecker(t *testing.T) {
@@ -698,7 +698,7 @@ func TestDialogRunReportsPartialFailure(t *testing.T) {
 // --------------------------------------------------------------------------
 // Auto-targeting across a mixed batch. The engine's per-source resolution is
 // covered in internal/premdown; what matters here is that run() keeps it
-// per-file — hoisting the resolution out of the loop would silently give every
+// per-file - hoisting the resolution out of the loop would silently give every
 // project in a selection the same target.
 // --------------------------------------------------------------------------
 
@@ -770,7 +770,7 @@ func TestRunAutoTargetsEachProjectIndependently(t *testing.T) {
 }
 
 // writeFutureProject writes a project stamped with a <Project> version far above
-// anything in the release map — a Premiere newer than this build knows about.
+// anything in the release map - a Premiere newer than this build knows about.
 // A literal is used rather than the map's own newest entry so the test keeps
 // meaning the same thing after the map gains a release.
 func writeFutureProject(t *testing.T, dir, name string) string {
@@ -836,7 +836,7 @@ func TestRunOffersAnUpgradeForAnUnrecognisedRelease(t *testing.T) {
 	}
 }
 
-// No upgrade to offer — already current, or offline — leaves the warning to
+// No upgrade to offer - already current, or offline - leaves the warning to
 // stand on its own. The conversion is unaffected either way.
 func TestRunStillWarnsWhenNoUpgradeIsAvailable(t *testing.T) {
 	c := newTestCLI(t, "")
@@ -860,7 +860,7 @@ func TestRunStillWarnsWhenNoUpgradeIsAvailable(t *testing.T) {
 }
 
 // Without opt-in the check is silent, but the run must still fall through to the
-// ordinary notice — otherwise a user who has never been asked would miss the
+// ordinary notice - otherwise a user who has never been asked would miss the
 // first-run question on the very surface built to put it.
 func TestRunUnrecognisedReleaseWithoutOptInStillAsks(t *testing.T) {
 	c := newTestCLI(t, "")

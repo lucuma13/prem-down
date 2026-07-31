@@ -13,7 +13,7 @@
 //
 // macOS has its own equivalent artwork: integrate_darwin.go embeds a committed
 // template TIFF (workflowCustomImageTemplate.tiff) and writes it into the Quick
-// Action bundle's Resources, where NSIconName references it — so the Finder
+// Action bundle's Resources, where NSIconName references it - so the Finder
 // right-click entry shows the prem-down glyph, tinted to match the OS.
 
 package integrate

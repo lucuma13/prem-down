@@ -75,7 +75,7 @@ func gunzipFile(t *testing.T, path string) []byte {
 }
 
 // --------------------------------------------------------------------------
-// reconstruct.go — the mini-DOM and the field re-insertion pass.
+// reconstruct.go - the mini-DOM and the field re-insertion pass.
 // --------------------------------------------------------------------------
 
 func TestRebuildInsertsMissingBounds(t *testing.T) {
@@ -100,7 +100,7 @@ func TestRebuildInsertsMissingBounds(t *testing.T) {
 }
 
 // A param where 2026 KEPT real (non-default) bounds must be left exactly as
-// Premiere wrote it — we must never clobber a real per-parameter value.
+// Premiere wrote it - we must never clobber a real per-parameter value.
 func TestRebuildLeavesCompleteInstanceByteIdentical(t *testing.T) {
 	complete := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
 	<ParameterID>1</ParameterID>
@@ -149,7 +149,7 @@ func TestRebuildClassOverrideForColorUpperBound(t *testing.T) {
 	if !strings.Contains(out, "<UpperBound>18446744073709551615</UpperBound>") {
 		t.Errorf("color class did not get the unbounded UpperBound override:\n%s", out)
 	}
-	// LowerBound is unaffected by the override — still the plain sentinel.
+	// LowerBound is unaffected by the override - still the plain sentinel.
 	if !strings.Contains(out, "<LowerBound>false</LowerBound>") {
 		t.Errorf("color class LowerBound should still be the false sentinel:\n%s", out)
 	}
@@ -264,7 +264,7 @@ func TestReconstructPositionalClassesStopsAtTheFirstBadInstance(t *testing.T) {
 }
 
 // Self-closing elements carry no content to complete, so they are stepped over
-// rather than rebuilt — and the instance around them is still byte-identical
+// rather than rebuilt - and the instance around them is still byte-identical
 // apart from the fields actually inserted.
 func TestRebuildSkipsSelfClosingChildren(t *testing.T) {
 	in := `<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
@@ -281,7 +281,7 @@ func TestRebuildSkipsSelfClosingChildren(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// downgrade.go — <Project> version stamping and path helpers.
+// downgrade.go - <Project> version stamping and path helpers.
 // --------------------------------------------------------------------------
 
 func TestSetAndGetProjectVersion(t *testing.T) {
@@ -541,7 +541,7 @@ func TestDowngradeCorruptGzipBody(t *testing.T) {
 	}
 }
 
-// downgrade returns the write failure when the output path is unwritable — here
+// downgrade returns the write failure when the output path is unwritable - here
 // its parent directory does not exist.
 func TestDowngradeWriteError(t *testing.T) {
 	dir := t.TempDir()
@@ -596,7 +596,7 @@ func TestDowngradeRefusesMalformedProjects(t *testing.T) {
 
 // verifyDowngraded is the gate between the finished document and the disk. It
 // is driven directly here because a document that fails it is by construction
-// one the conversion above it was supposed to make impossible — the point of
+// one the conversion above it was supposed to make impossible - the point of
 // the check is that a future change which breaks that is refused, not written.
 func TestVerifyDowngradedRefusesABadConversion(t *testing.T) {
 	const stamped = `<PremiereData Version="3">
@@ -714,7 +714,7 @@ func TestDowngrade2026Fixture(t *testing.T) {
 }
 
 // unrecognisedProject writes a project stamped with a <Project> version above
-// anything in the release map — the shape a Premiere release newer than this
+// anything in the release map - the shape a Premiere release newer than this
 // build's map takes on disk.
 func unrecognisedProject(t *testing.T, dir string, version int) string {
 	t.Helper()

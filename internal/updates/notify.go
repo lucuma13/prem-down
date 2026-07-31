@@ -46,7 +46,7 @@ func (c *Checker) prompt(in io.Reader, out io.Writer) bool {
 // succeeded, and reports a newer release on out.
 //
 // mayAsk says this run is attached to a surface where a question can be put to
-// the user and answered — for a file-manager integration, a desktop dialog or a
+// the user and answered - for a file-manager integration, a desktop dialog or a
 // console it already owns. The first-run question is only asked there:
 // those are the surfaces where the user has no other way to discover the
 // setting, and the ones with somewhere to put a question. A plain terminal run
@@ -58,7 +58,7 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 	// A version that cannot be compared makes the whole feature inert: no notice
 	// could ever come out of it. Bail before touching the settings or the network,
 	// rather than asking for consent to a check that can only discard its own
-	// answer. This is the dev-build case — an unstamped build, or the `git
+	// answer. This is the dev-build case - an unstamped build, or the `git
 	// describe` string a working-tree build carries ("1.2.3-4-gabc-dirty"), which
 	// is by definition already at or past the release it names.
 	if parseVersion(c.Version) == nil {
@@ -80,7 +80,7 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 		}
 		// Persist the answer before acting on it: if the request below fails, or
 		// the process is killed, the user must still not be asked a second time.
-		// A dismissed prompt lands here as stateOff — silence is read as "no".
+		// A dismissed prompt lands here as stateOff - silence is read as "no".
 		if err := c.save(s); err != nil {
 			return
 		}
