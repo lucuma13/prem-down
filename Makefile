@@ -4,7 +4,7 @@
 # Identity derived from the cmd/<name> layout.
 BINARY  := $(notdir $(CURDIR))
 PKG     := ./cmd/$(BINARY)
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION := $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOBIN   := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
 EXE     := $(GOBIN)/$(BINARY)$(shell go env GOEXE)

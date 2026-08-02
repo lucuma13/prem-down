@@ -93,8 +93,8 @@ func TestRunHelpAndVersion(t *testing.T) {
 	if code := c.run([]string{"--version"}); code != 0 {
 		t.Errorf("--version: want 0, got code=%d", code)
 	}
-	if !strings.Contains(c.out.String(), "prem-down "+version) {
-		t.Errorf("--version not printed: %q", c.out)
+	if got := strings.TrimSpace(c.out.String()); got != version {
+		t.Errorf("--version = %q, want %q", got, version)
 	}
 }
 

@@ -56,7 +56,7 @@ func (c *Checker) noticeText(u Upgrade) string {
 	if u.Verb == verbRun {
 		target = "'" + target + "'"
 	}
-	return fmt.Sprintf("%s %s is available.\n%s: %s", c.Product, u.Version, u.Verb, target)
+	return fmt.Sprintf("%s %s is available.\n%s: %s", c.Product, plainVersion(u.Version), u.Verb, target)
 }
 
 // plainVersion renders a version bare, without the "v" a release tag may carry.

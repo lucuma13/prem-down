@@ -234,7 +234,7 @@ func (c *cli) run(args []string) int {
 			usage(c.out)
 			return 0
 		case a == "--version":
-			_, _ = fmt.Fprintf(c.out, "prem-down %s\n", version)
+			_, _ = fmt.Fprintln(c.out, version)
 			return 0
 		case a == "--to":
 			i++

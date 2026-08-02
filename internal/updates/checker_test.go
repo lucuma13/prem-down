@@ -132,8 +132,11 @@ func TestNoticeTextQuotesOnlyACommand(t *testing.T) {
 
 	// Either way the notice names the product and the version on offer.
 	for _, got := range []string{run, download} {
-		if !strings.Contains(got, "my-tool") || !strings.Contains(got, "v1.1.0") {
+		if !strings.Contains(got, "my-tool") || !strings.Contains(got, "1.1.0") {
 			t.Errorf("notice should name the product and version:\n%s", got)
+		}
+		if strings.Contains(got, "v1.1.0") {
+			t.Errorf("notice should carry no \"v\":\n%s", got)
 		}
 	}
 }
@@ -404,7 +407,7 @@ func TestNotifyAcceptsAndReports(t *testing.T) {
 	if hits.Load() != 1 {
 		t.Errorf("want one request on opting in, got %d", hits.Load())
 	}
-	for _, want := range []string{"my-tool", "v1.1.0", "is available"} {
+	for _, want := range []string{"my-tool", "1.1.0", "is available"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("notice missing %q:\n%s", want, got)
 		}
@@ -468,7 +471,7 @@ func TestNotifyThrottlesRequestsAndNotices(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
 	c.Ask = func(string, io.Reader, io.Writer) bool { return true }
 
-	if got := notify(c, true); !strings.Contains(got, "v1.1.0") {
+	if got := notify(c, true); !strings.Contains(got, "1.1.0") {
 		t.Fatalf("first run should report the upgrade, got %q", got)
 	}
 	for i := 0; i < 3; i++ {
@@ -482,7 +485,7 @@ func TestNotifyThrottlesRequestsAndNotices(t *testing.T) {
 
 	// Past the interval, the reminder comes back, and one more request goes out.
 	c.Now = func() time.Time { return time.Now().Add(DefaultInterval + time.Minute) }
-	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+	if got := notify(c, false); !strings.Contains(got, "1.1.0") {
 		t.Errorf("want the reminder once the interval has passed, got %q", got)
 	}
 	if hits.Load() != 2 {
@@ -499,7 +502,7 @@ func TestNotifyRemindsOnItsOwnClock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+	if got := notify(c, false); !strings.Contains(got, "1.1.0") {
 		t.Fatalf("first run should report the upgrade, got %q", got)
 	}
 	s, _ := c.load()
@@ -515,7 +518,7 @@ func TestNotifyRemindsOnItsOwnClock(t *testing.T) {
 
 	// A clock that jumped backwards must not mute the reminder indefinitely.
 	c.Now = func() time.Time { return time.Now().Add(-2 * DefaultInterval) }
-	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+	if got := notify(c, false); !strings.Contains(got, "1.1.0") {
 		t.Errorf("clock skew should read as due, got %q", got)
 	}
 }
@@ -527,7 +530,7 @@ func TestNotifyDoesNotStartTheClockOnAnUnshownNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	// announce declines, so the notice falls back to the writer and is shown.
-	if got := notify(c, true); !strings.Contains(got, "v1.1.0") {
+	if got := notify(c, true); !strings.Contains(got, "1.1.0") {
 		t.Fatalf("a declined announcement should still print, got %q", got)
 	}
 	s, _ := c.load()
@@ -808,7 +811,7 @@ func TestCommandStatusReportsOnlyTheSetting(t *testing.T) {
 			if got := strings.TrimSpace(o.String()); got != tc.want {
 				t.Errorf("status = %q, want %q", got, tc.want)
 			}
-			for _, leaked := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0", c.ConfigPath} {
+			for _, leaked := range []string{"last checked", checked.Local().Format(time.RFC1123), "1.1.0", c.ConfigPath} {
 				if strings.Contains(o.String(), leaked) {
 					t.Errorf("status leaked %q:\n%s", leaked, o.String())
 				}
