@@ -29,9 +29,8 @@ const (
 	stateOff   = "off"
 )
 
-// DefaultInterval is the minimum gap between two requests. The notice itself is
-// not throttled: the version last seen is cached, so a pending upgrade is
-// reported on every run until it is taken.
+// DefaultInterval is the minimum gap between two requests, and equally between
+// two notices.
 const DefaultInterval = 7 * 24 * time.Hour
 
 // DefaultCommandName is the subcommand Command implements, used in its own
@@ -90,6 +89,8 @@ type settings struct {
 	// "0001-01-01T00:00:00Z" in a file the user is invited to look at.
 	LastChecked time.Time `json:"last_checked,omitzero"`
 	LatestSeen  string    `json:"latest_seen,omitempty"`
+	// When the pending upgrade was last put in front of the user.
+	LastNotified time.Time `json:"last_notified,omitzero"`
 }
 
 // configPath is where the settings live: ~/Library/Application Support on

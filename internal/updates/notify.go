@@ -111,10 +111,8 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 		return
 	}
 
-	// The request is throttled, the notice is not: LatestSeen persists, so a
-	// pending upgrade is reported on every run until it is taken, while GitHub
-	// is contacted at most once an interval. A first "on" leaves LastChecked
-	// zero, so opting in checks straight away.
+	// GitHub is contacted at most once an interval. A first "on" leaves
+	// LastChecked zero, so opting in checks straight away.
 	age := c.now().Sub(s.LastChecked)
 	if age < 0 || age >= c.interval() { // age < 0 => clock skew; treat as stale
 		if latest, err := c.latest(); err == nil {
@@ -128,6 +126,14 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 	if s.LatestSeen == "" || !Newer(c.Version, s.LatestSeen) {
 		return
 	}
+
+	// The notice is throttled on its own clock: an upgrade the user chose not
+	// to take is worth raising again in a week. Told in the future means clock
+	// skew, and is treated as due.
+	if since := c.now().Sub(s.LastNotified); since >= 0 && since < c.interval() {
+		return
+	}
+
 	verb, target := c.upgradeHint()
 	u := Upgrade{Version: s.LatestSeen, Verb: verb, Target: target}
 
@@ -135,10 +141,14 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 	// dialog too: a file-manager run has nowhere to print to, and its output
 	// may be discarded entirely. Printing is the fallback, and the only path a
 	// terminal run takes.
-	if mayAsk && c.announce(u) {
-		return
+	announced := mayAsk && c.announce(u)
+	if !announced {
+		_, _ = fmt.Fprintf(out, "\n%s\n", c.noticeText(u))
 	}
-	_, _ = fmt.Fprintf(out, "\n%s\n", c.noticeText(u))
+	// Recorded however it was delivered, and only once it has been: a notice
+	// that was never shown must not start the week's silence.
+	s.LastNotified = c.now()
+	_ = c.save(s)
 }
 
 // Upgrade is a newer release that is available, and how to get it.

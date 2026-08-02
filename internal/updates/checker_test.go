@@ -422,7 +422,7 @@ func TestNotifyPrintsWhenTheDialogFails(t *testing.T) {
 
 // The request is throttled but the notice is not: a pending upgrade keeps being
 // reported from the cached version while GitHub is left alone.
-func TestNotifyThrottlesRequestsNotNotices(t *testing.T) {
+func TestNotifyThrottlesRequestsAndNotices(t *testing.T) {
 	c, hits := newTestChecker(t, "1.0.0", "v1.1.0")
 	c.Ask = func(string, io.Reader, io.Writer) bool { return true }
 
@@ -430,19 +430,67 @@ func TestNotifyThrottlesRequestsNotNotices(t *testing.T) {
 		t.Fatalf("first run should report the upgrade, got %q", got)
 	}
 	for i := 0; i < 3; i++ {
-		if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
-			t.Errorf("run %d should still report the upgrade, got %q", i+2, got)
+		if got := notify(c, false); got != "" {
+			t.Errorf("run %d should stay quiet, got %q", i+2, got)
 		}
 	}
 	if hits.Load() != 1 {
 		t.Errorf("want the request throttled to 1, got %d", hits.Load())
 	}
 
-	// Past the interval, one more request goes out.
+	// Past the interval, the reminder comes back, and one more request goes out.
 	c.Now = func() time.Time { return time.Now().Add(DefaultInterval + time.Minute) }
-	notify(c, false)
+	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+		t.Errorf("want the reminder once the interval has passed, got %q", got)
+	}
 	if hits.Load() != 2 {
 		t.Errorf("want a second request once stale, got %d", hits.Load())
+	}
+}
+
+// The two clocks are independent: a check that goes out without finding
+// anything newer must not reset the reminder, and a reminder must not go out
+// just because a request did.
+func TestNotifyRemindsOnItsOwnClock(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	if err := c.save(settings{Updates: stateOn, LatestSeen: "v1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+		t.Fatalf("first run should report the upgrade, got %q", got)
+	}
+	s, _ := c.load()
+	if s.LastNotified.IsZero() {
+		t.Error("showing the notice should record when it was shown")
+	}
+
+	// Just short of the interval: still quiet.
+	c.Now = func() time.Time { return time.Now().Add(DefaultInterval - time.Minute) }
+	if got := notify(c, false); got != "" {
+		t.Errorf("want silence just inside the interval, got %q", got)
+	}
+
+	// A clock that jumped backwards must not mute the reminder indefinitely.
+	c.Now = func() time.Time { return time.Now().Add(-2 * DefaultInterval) }
+	if got := notify(c, false); !strings.Contains(got, "v1.1.0") {
+		t.Errorf("clock skew should read as due, got %q", got)
+	}
+}
+
+// A notice that could not be delivered must not start the week's silence.
+func TestNotifyDoesNotStartTheClockOnAnUnshownNotice(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	if err := c.save(settings{Updates: stateOn, LatestSeen: "v1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	// announce declines, so the notice falls back to the writer and is shown.
+	if got := notify(c, true); !strings.Contains(got, "v1.1.0") {
+		t.Fatalf("a declined announcement should still print, got %q", got)
+	}
+	s, _ := c.load()
+	if s.LastNotified.IsZero() {
+		t.Error("the printed fallback is still the user being told")
 	}
 }
 
