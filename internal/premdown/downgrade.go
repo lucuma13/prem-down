@@ -159,22 +159,37 @@ func readMaybeGzip(src string) ([]byte, error) {
 // file.
 //
 // O_EXCL: the caller picked a free name, but something else may have claimed it
-// since; fail with "file exists" rather than overwrite it. Because O_EXCL means
-// we created dst, it holds nothing but our own partial output, so on any
-// failure we remove it rather than leave a truncated project sitting next to
-// the original where it could be opened by mistake.
+// since; fail with "file exists" rather than overwrite it.
 func writeNew(dst string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) //nolint:gosec // G302,G304: dst sits next to the user-supplied input; a project file is meant to be opened and shared, so 0644 is deliberate
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
+	return fillNew(f, dst, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
+
+// fillNew writes the body of a file the caller has just created at dst, closes
+// it, and removes dst if either step fails.
+//
+// Because the callers open dst with O_EXCL, it holds nothing but our own
+// partial output, so on any failure we remove it rather than leave a truncated
+// project sitting next to the original where it could be opened by mistake.
+//
+// write takes the open file rather than fillNew taking the bytes, so the one
+// caller writing a buffer and the one streaming a copy share a single cleanup
+// path - and so that path can be exercised without provoking a real write
+// failure, which no working filesystem will offer.
+func fillNew(f *os.File, dst string, write func(io.Writer) error) error {
+	if err := write(f); err != nil {
 		_ = f.Close()
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path the caller just created; removing our own partial output
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial output
+		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path the caller just created; removing our own partial output
 		return err
 	}
 	return nil
@@ -280,13 +295,22 @@ func verifyDowngraded(xml string, wantVersion int, reinserted bool) error {
 	if !reinserted {
 		return nil
 	}
-	if reXML != xml {
-		return fmt.Errorf("verify: a second reconstruction pass changed the output; the first pass was not a fixpoint")
-	}
+	// Every field, sorted: ranging a map would name an arbitrary one of several
+	// and read differently on each run, and the whole set is what says how far
+	// the conversion fell short.
+	var stillMissing []string
 	for k, n := range stats {
 		if n > 0 {
-			return fmt.Errorf("verify: reconstruction still inserted %s/%s (%dx); required fields were missing after downgrade", k.tag, k.field, n)
+			stillMissing = append(stillMissing, fmt.Sprintf("%s/%s (%dx)", k.tag, k.field, n))
 		}
+	}
+	if len(stillMissing) > 0 {
+		sort.Strings(stillMissing)
+		return fmt.Errorf("verify: reconstruction still inserted %s; required fields were missing after downgrade",
+			strings.Join(stillMissing, ", "))
+	}
+	if reXML != xml {
+		return fmt.Errorf("verify: a second reconstruction pass changed the output; the first pass was not a fixpoint")
 	}
 	return nil
 }
