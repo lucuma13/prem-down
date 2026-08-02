@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: setup-dev upgrade pre-commit test install uninstall reinstall clean help
+.PHONY: setup-dev upgrade pre-commit test render install uninstall reinstall clean help
 
 # Identity derived from the cmd/<name> layout.
 BINARY  := $(notdir $(CURDIR))
@@ -33,6 +33,9 @@ pre-commit: ## Run all pre-commit hooks
 
 test: ## Run the test suite
 	go test -coverprofile=coverage.out -covermode=atomic ./...
+
+render: ## Regenerate the committed icon artwork
+	./scripts/render/icons.sh
 
 install: ## Install to $GOBIN and integrate the right-click action (macOS/Windows)
 	go install -trimpath -ldflags '$(LDFLAGS)' $(PKG)

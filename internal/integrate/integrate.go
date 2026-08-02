@@ -9,6 +9,23 @@
 //     (integrate_windows.go). The MSI installer ships equivalent HKLM keys, so
 //     this is only needed for portable installs.
 //
+// Each platform shows the prem-down icon on its menu entry, from artwork
+// committed in this repo:
+//
+//   - Windows: rsrc_windows_amd64.syso, which the Go linker embeds into
+//     windows/amd64 builds automatically. integrate_windows.go and the MSI
+//     (packaging/windows/prem-down.wxs) both point the menu's Icon at the exe
+//     itself, and Windows lifts the icon out of the binary's resources. It is
+//     committed so GoReleaser needs no extra build step.
+//   - macOS: workflowCustomImageTemplate.tiff, embedded by integrate_darwin.go
+//     and written into the Quick Action bundle's Resources, where NSIconName
+//     references it - a template image, so the glyph is tinted to match the OS.
+//
+// The .syso is rendered by `make render` from the PNG files in
+// packaging/windows/winres/. It also rebuilds the dialog icon in
+// internal/updates from those PNG files. All of it can be rebuilt on any OS,
+// though the .icns off a Mac takes a fallback encoder whose bytes differ.
+//
 // "integrate off" undoes the wiring.
 package integrate
 

@@ -20,9 +20,7 @@ import (
 // visibly ours. Without it the dialog inherits osascript's own icon, which
 // tells the user nothing about who is asking.
 //
-// To regenerate: stage packaging/windows/winres/icon{16,32,64,128,256}.png into
-// a .iconset under the names iconutil expects (icon_16x16.png,
-// icon_16x16@2x.png, ...) and run `iconutil -c icns <dir> -o prem-down.icns`.
+// It is committed, and buildable with `make render`.
 //
 //go:embed prem-down.icns
 var dialogIcon []byte

@@ -1,5 +1,15 @@
+<!--
+  The prem-down mark, and the source every icon raster is rendered from:
+  scripts/render/icons.sh draws packaging/windows/winres/icon*.png from this
+  file, and the Windows .syso and macOS .icns are built from those.
+
+  The backing plate keeps its id because that script hides it with a stylesheet
+  to get the transparent variant those rasters need - they are drawn onto menus
+  and dialogs that supply their own background. Renaming or removing the id
+  fails the render.
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">
-  <rect width="100" height="100" rx="20" fill="#000033"/>
+  <rect id="backdrop" width="100" height="100" rx="20" fill="#000033"/>
 
   <g fill="#9999FF" opacity="0.4">
     <rect x="10" y="10" width="6" height="8" rx="1"/>
