@@ -2,7 +2,7 @@
 # Render the committed brand artwork - the README banner and the GitHub social
 # preview - from the one geometry defined here:
 #
-#   docs/assets/prem-down_banner.svg                  - README header, 1600x400
+#   docs/assets/prem-down_banner.svg                  - README header, 1600x300
 #   docs/assets/prem-down_social_preview_1280x640.png - GitHub social preview,
 #                                                       exported at 2x
 #                                                       (2560x1280)
@@ -94,21 +94,25 @@ EOF
 }
 
 # ------------------------------ banner ---------------------------------------
-# 1600x400, mark on the left, "prem-down" set on one line beside it. The text
-# origin puts the wordmark's bounding box at 720.652,145.712 - matching the
-# committed artwork - at font-size 113.
+# 1600x300, mark on the left, "prem-down" set on one line beside it.
+#
+# The composition is the original 1600x400 one at 0.75, on a canvas that kept
+# its width: mark scale 4 -> 3 and font-size 113 -> 84.75, with the mark and
+# wordmark recentred as a pair. That leaves the block's bounding box at
+# 397.606,25.5 spanning 804.789x249 - centred on both axes - and the wordmark's
+# own box at 740.507,109.284.
 if [ "$TARGET" = "banner" ] || [ "$TARGET" = "all" ]; then
   echo "rendering $BANNER_SVG"
   cat >"$TMP/banner.svg" <<EOF
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 400" width="1600" height="400">
-  <rect width="1600" height="400" fill="$BG"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 300" width="1600" height="300">
+  <rect width="1600" height="300" fill="$BG"/>
 
   <!-- original mark, no wordmark -->
-$(mark "translate(223.45 -6) scale(4)")
+$(mark "translate(367.606 -4.5) scale(3)")
 
   <!-- wordmark: "prem-down" -->
-  <text x="712.29" y="233.4" fill="$FG"
-        font-family="$WORDMARK_FONT" font-weight="$WORDMARK_WEIGHT" font-size="113">prem-down</text>
+  <text x="734.236" y="175.05" fill="$FG"
+        font-family="$WORDMARK_FONT" font-weight="$WORDMARK_WEIGHT" font-size="84.75">prem-down</text>
 </svg>
 EOF
   # Outline the text so the committed SVG carries no font dependency.
