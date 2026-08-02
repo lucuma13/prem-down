@@ -1,9 +1,9 @@
 ---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-# Template: __VERSION__, __TAG__, __SHA256__ and __PRODUCT_CODE__ are filled in
-# by the publish-windows-installer job in publish.yml from the MSI it just
-# built. __VERSION__ is the bare number (0.2.0) and __TAG__ the git tag it came
-# from (v0.2.0) - the release is addressed by tag, the package by version.
+# Template: the version, tag, SHA256 and product-code placeholders below are
+# filled in by the publish-windows-installer job in publish.yml from the MSI it
+# just built. PackageVersion is the bare number; InstallerUrl uses the git tag -
+# the release is addressed by tag, the package by version.
 PackageIdentifier: lucuma13.prem-down
 PackageVersion: "__VERSION__"
 InstallerType: wix
