@@ -32,7 +32,7 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 #### Context Menu Integration
 
-<img src="docs/assets/prem-down_demo.webp" width=100% alt="Right-clicking a .prproj in Finder and in File Explorer, choosing Downgrade for older Premiere, and the downgraded copy appearing next to the original"/>
+<img src="docs/assets/prem-down_demo.webp" width=100% alt="Right-click a .prproj in Finder or File Explorer, choose 'Quick Actions' or 'Show more options' and then 'Downgrade for older Premiere', the downgraded copy appears next to the original"/>
 
 #### CLI (Terminal)
 
