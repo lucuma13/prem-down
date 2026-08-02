@@ -22,6 +22,8 @@ repos:
         args: [--fix=lf]
       - id: trailing-whitespace
         exclude: \.md$
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
   # Spellcheck
   - repo: https://github.com/crate-ci/typos
     rev: v1.48.0
@@ -79,3 +81,33 @@ repos:
         language: system
         files: \.go$
         pass_filenames: false
+  # Bash formatter
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+  # Bash linter
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        exclude_types: [bats]
+  # Swift formatter
+  - repo: local
+    hooks:
+      - id: swift-format
+        name: swift-format
+        entry: swift format format --in-place --parallel
+        args:
+          - --configuration
+          - '{"version":1,"lineLength":120,"indentation":{"spaces":4}}'
+        language: system
+        types: [swift]
+      - id: swift-format-lint
+        name: swift-format lint
+        entry: swift format lint --strict --parallel
+        args:
+          - --configuration
+          - '{"version":1,"lineLength":120,"indentation":{"spaces":4}}'
+        language: system
+        types: [swift]

@@ -25,8 +25,17 @@ indent_size = unset
 indent_style = tab
 indent_size = unset
 
+[*.{sh,bash,bats}]
+indent_size = 2
+
+[*.swift]
+indent_size = 4
+
 [internal/premdown/testdata/**]
 charset = unset
 end_of_line = unset
 insert_final_newline = unset
 trim_trailing_whitespace = unset
+
+[packaging/macos/scripts/postinstall]
+indent_size = 2
