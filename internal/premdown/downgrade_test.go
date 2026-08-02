@@ -3,6 +3,7 @@ package premdown
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -541,6 +542,80 @@ func TestDowngradeCorruptGzipBody(t *testing.T) {
 	}
 }
 
+// Every file this package creates is written through fillNew, and the contract
+// it carries is that a failure leaves nothing behind: the file was opened with
+// O_EXCL, so it holds only our own partial output, and a truncated project left
+// next to the original is one the user could open by mistake.
+//
+// Driven directly because neither a failing write nor a failing close can be
+// provoked through writeNew or copyFile on a filesystem that works.
+func TestFillNewRemovesPartialOutput(t *testing.T) {
+	// A real file, created exactly as the callers create theirs.
+	newFile := func(t *testing.T) (*os.File, string) {
+		t.Helper()
+		dst := filepath.Join(t.TempDir(), "out"+PrprojExt)
+		f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302,G304: this test's own t.TempDir path, opened the way writeNew opens its output
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f, dst
+	}
+
+	t.Run("a failed write", func(t *testing.T) {
+		f, dst := newFile(t)
+		boom := errors.New("boom")
+		err := fillNew(f, dst, func(w io.Writer) error {
+			// Some bytes land before the failure: this is the truncated-output
+			// case, not a file that was never touched.
+			if _, err := w.Write([]byte("half a project")); err != nil {
+				t.Fatalf("setting up a partial write: %v", err)
+			}
+			return boom
+		})
+		if !errors.Is(err, boom) {
+			t.Errorf("fillNew = %v, want the write's own error", err)
+		}
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			t.Errorf("the partial file was left behind (stat err: %v)", err)
+		}
+	})
+
+	t.Run("a failed close", func(t *testing.T) {
+		f, dst := newFile(t)
+		// Closed early so fillNew's own Close fails, which is the shape of a
+		// write whose error only surfaces when the last buffer is flushed - the
+		// reason closing is checked at all rather than deferred.
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		err := fillNew(f, dst, func(io.Writer) error { return nil })
+		if err == nil {
+			t.Fatal("a failed close must be reported, not swallowed")
+		}
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			t.Errorf("the file was left behind after a failed close (stat err: %v)", err)
+		}
+	})
+
+	// The other half of the contract: nothing failed, so nothing is removed.
+	t.Run("a successful write keeps the file", func(t *testing.T) {
+		f, dst := newFile(t)
+		if err := fillNew(f, dst, func(w io.Writer) error {
+			_, err := w.Write([]byte("a whole project"))
+			return err
+		}); err != nil {
+			t.Fatalf("fillNew: %v", err)
+		}
+		got, err := os.ReadFile(dst) //nolint:gosec // G304: this test's own t.TempDir path
+		if err != nil {
+			t.Fatalf("output unreadable: %v", err)
+		}
+		if string(got) != "a whole project" {
+			t.Errorf("output = %q, want %q", got, "a whole project")
+		}
+	})
+}
+
 // downgrade returns the write failure when the output path is unwritable - here
 // its parent directory does not exist.
 func TestDowngradeWriteError(t *testing.T) {
@@ -594,6 +669,38 @@ func TestDowngradeRefusesMalformedProjects(t *testing.T) {
 	}
 }
 
+// The same corrupt class instance as above, reaching the refusal by the other
+// route. From a source above 43 the conversion reconstructs every class, so a
+// malformed one is refused on the way in - which is what the case above covers.
+// At 43 or below there is nothing to re-insert, the document is never parsed on
+// the way in, and verifyDowngraded's re-parse is the only thing between a
+// corrupt source and a corrupt file written next to it. Downgrade has to pass
+// that refusal on rather than write the gzip it has already built.
+func TestDowngradeVerifiesAPassThroughConversion(t *testing.T) {
+	dir := t.TempDir()
+	xml := `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="43"></Project>
+<VideoComponentParam ObjectID="10" ClassID="x" Version="10">
+	<LowerBound>1</Wrong>
+</VideoComponentParam>
+</PremiereData>`
+	src := writeFile(t, filepath.Join(dir, "in"+PrprojExt), xml)
+	out := filepath.Join(dir, "out"+PrprojExt)
+
+	// 43 -> 42 is the pass-through shape: both sides are dense, so
+	// needsFieldReinsertion is false and no class is touched going in.
+	err := silent().Downgrade(src, out, 42, false)
+	if err == nil {
+		t.Fatal("expected a refusal for a corrupt pass-through, got nil")
+	}
+	if !strings.Contains(err.Error(), "verify:") {
+		t.Errorf("error %q should come from the verify step", err)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("no output file should be written for a refused project")
+	}
+}
+
 // verifyDowngraded is the gate between the finished document and the disk. It
 // is driven directly here because a document that fails it is by construction
 // one the conversion above it was supposed to make impossible - the point of
@@ -621,9 +728,13 @@ func TestVerifyDowngradedRefusesABadConversion(t *testing.T) {
 			false, "re-parse",
 		},
 		// A required field still missing after a conversion that was supposed to
-		// re-insert them: a second pass would change the document, so the first
-		// one was not a fixpoint.
-		{"fields still missing", stamped + "\n" + sparseVideoComponentParam, true, "fixpoint"},
+		// re-insert them. A second pass would insert them, which is also what
+		// makes the document change, so the refusal names the fields rather than
+		// only reporting that something moved.
+		{
+			"fields still missing", stamped + "\n" + sparseVideoComponentParam, true,
+			"VideoComponentParam/LowerBound (1x), VideoComponentParam/UpperBound (1x)",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

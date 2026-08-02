@@ -23,12 +23,19 @@ func TestDialogScriptCompiles(t *testing.T) {
 	if _, err := os.Stat(osacompile); err != nil {
 		t.Skipf("%s unavailable: %v", osacompile, err)
 	}
-	// Both variants. The iconless one is only reached when staging the logo
-	// fails, rare but costly enough to get wrong: ask treats every osascript
-	// failure as "no", and Notify persists that answer forever.
+	// Every script this file can run, including both iconless variants. Those
+	// are only reached when staging the logo fails, rare but costly enough to
+	// get wrong: ask treats every osascript failure as "no", and Notify
+	// persists that answer forever. The notice pair fails the same way in the
+	// other direction - announceDialog reads a broken script as a dialog that
+	// could not be raised, so the upgrade is quietly printed instead of
+	// offered, for every user, forever.
 	for name, script := range map[string]string{
-		"withIcon": dialogScript,
-		"noIcon":   dialogScriptNoIcon,
+		"prompt":        dialogScript,
+		"promptNoIcon":  dialogScriptNoIcon,
+		"notice":        noticeScript,
+		"noticeNoIcon":  noticeScriptNoIcon,
+		"runInTerminal": runInTerminalScript,
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "dialog.scpt")
@@ -80,5 +87,72 @@ func TestStageIconWritesTheLogo(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("cleanup left the icon behind (stat err: %v)", err)
+	}
+}
+
+// What "Update now" runs cannot be exercised here - it opens a Terminal window
+// - so the command it would run is pinned instead. A wrong one is silent: the
+// window opens, something fails inside it, and the user is left with a prompt.
+func TestUpgradeCommand(t *testing.T) {
+	c := New("lucuma13/prem-down", "prem-down", "0.0.9")
+
+	// A channel with its own upgrade command runs exactly that.
+	const brew = "brew upgrade prem-down"
+	if got := c.upgradeCommand(Upgrade{Verb: verbRun, Target: brew}); got != brew {
+		t.Errorf("upgradeCommand = %q, want %q", got, brew)
+	}
+
+	// Anything else fetches the .pkg and opens it. The URL has to be the
+	// latest-release redirect and the asset name publish.yml uploads, or the
+	// download 404s.
+	got := c.upgradeCommand(Upgrade{Verb: verbDownload, Target: c.releasesPage()})
+	for _, want := range []string{
+		"curl -fL",
+		"https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_macos.pkg",
+		"open ",
+		`"$TMPDIR/prem-down-installer.pkg"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("installer command %q missing %q", got, want)
+		}
+	}
+	// The command is handed to Terminal's "do script" as one shell line, so the
+	// download has to gate the open: a 404 that still ran `open` would hand the
+	// user an error dialog about a corrupt package.
+	if !strings.Contains(got, "&&") {
+		t.Errorf("installer command %q should only open the .pkg if the download succeeded", got)
+	}
+}
+
+// installerURL is the one string in this file that cannot be wrong quietly:
+// c.Product is spliced into an asset name, so a Product that is not the release
+// asset's prefix 404s at the worst moment.
+func TestInstallerURL(t *testing.T) {
+	c := New("lucuma13/prem-down", "prem-down", "0.0.9")
+	const want = "https://github.com/lucuma13/prem-down/releases/latest/download/prem-down_installer_macos.pkg"
+	if got := c.installerURL(); got != want {
+		t.Errorf("installerURL = %q, want %q", got, want)
+	}
+}
+
+// The dialog carries both versions, and the whole point of the notice is that
+// the user can compare them. They are rendered bare: the tag GitHub returns
+// carries a "v" and the version the binary reports does not, so passing them
+// through unchanged would show "1.2.0 (you have 1.1.0)" one release and
+// "v1.2.0 (you have 1.1.0)" the next.
+func TestDialogTextComparesBareVersions(t *testing.T) {
+	c := New("lucuma13/prem-down", "prem-down", "1.1.0")
+	got := c.dialogText(Upgrade{Version: "v1.2.0", Verb: verbDownload, Target: c.releasesPage()})
+
+	if !strings.Contains(got, "1.2.0") || !strings.Contains(got, "1.1.0") {
+		t.Errorf("dialog text %q should name both versions", got)
+	}
+	if strings.Contains(got, "v1.2.0") {
+		t.Errorf("dialog text %q still carries the tag's leading v", got)
+	}
+	// The macOS buttons say what they do ("Update now"), so unlike the Windows
+	// box the text must not also ask - two questions, one pair of buttons.
+	if strings.Contains(got, "?") {
+		t.Errorf("dialog text %q asks a question the buttons already answer", got)
 	}
 }

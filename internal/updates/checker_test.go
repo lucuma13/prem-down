@@ -96,6 +96,48 @@ func TestComparable(t *testing.T) {
 	}
 }
 
+// Both platforms' dialogs render versions through plainVersion, so a release
+// tag and the version the binary reports read alike side by side. A leading "v"
+// comes off.
+func TestPlainVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"v1.2.3": "1.2.3",
+		"1.2.3":  "1.2.3",
+		"":       "",
+		"v":      "",
+		"vv1.0":  "v1.0", // only the one prefix
+	} {
+		if got := plainVersion(in); got != want {
+			t.Errorf("plainVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The printed notice is the fallback for every run with no dialog, and it has
+// to be pasteable: an upgrade command is quoted so it reads as one thing to
+// run, while a download URL is left bare so the terminal can linkify it.
+func TestNoticeTextQuotesOnlyACommand(t *testing.T) {
+	c := New("owner/repo", "my-tool", "1.0.0")
+
+	run := c.noticeText(Upgrade{Version: "v1.1.0", Verb: verbRun, Target: "brew upgrade my-tool"})
+	if !strings.Contains(run, "'brew upgrade my-tool'") {
+		t.Errorf("a command should be quoted:\n%s", run)
+	}
+
+	page := c.releasesPage()
+	download := c.noticeText(Upgrade{Version: "v1.1.0", Verb: verbDownload, Target: page})
+	if !strings.Contains(download, page) || strings.Contains(download, "'"+page+"'") {
+		t.Errorf("a URL should be left bare:\n%s", download)
+	}
+
+	// Either way the notice names the product and the version on offer.
+	for _, got := range []string{run, download} {
+		if !strings.Contains(got, "my-tool") || !strings.Contains(got, "v1.1.0") {
+			t.Errorf("notice should name the product and version:\n%s", got)
+		}
+	}
+}
+
 // Without an override the request goes to GitHub's latest-release API for Repo,
 // which is the one network endpoint this package ever contacts.
 func TestEndpointDefaultsToGitHub(t *testing.T) {
@@ -745,21 +787,48 @@ func TestCommandReportsAFailedSave(t *testing.T) {
 
 // Status reports the setting and nothing else.
 func TestCommandStatusReportsOnlyTheSetting(t *testing.T) {
-	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	checked := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
-	if err := c.save(settings{Updates: stateOn, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name  string
+		state string
+		want  string
+	}{
+		{"on", stateOn, "Update checks are on."},
+		{"off", stateOff, "Update checks are off."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+			if err := c.save(settings{Updates: tc.state, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
+				t.Fatal(err)
+			}
+			var o, e bytes.Buffer
+			if code := c.Command(&o, &e, nil); code != 0 {
+				t.Fatalf("status: code=%d err=%q", code, e.String())
+			}
+			if got := strings.TrimSpace(o.String()); got != tc.want {
+				t.Errorf("status = %q, want %q", got, tc.want)
+			}
+			for _, leaked := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0", c.ConfigPath} {
+				if strings.Contains(o.String(), leaked) {
+					t.Errorf("status leaked %q:\n%s", leaked, o.String())
+				}
+			}
+		})
 	}
+}
+
+// The unset state is the one the first-run question has not been put for yet,
+// so its status has to say where to set it rather than imply a default the
+// user never chose.
+func TestCommandStatusReportsTheUnsetState(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	var o, e bytes.Buffer
 	if code := c.Command(&o, &e, nil); code != 0 {
 		t.Fatalf("status: code=%d err=%q", code, e.String())
 	}
-	if got := strings.TrimSpace(o.String()); got != "Update checks are on." {
-		t.Errorf("status = %q, want just the setting", got)
-	}
-	for _, leaked := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0", c.ConfigPath} {
-		if strings.Contains(o.String(), leaked) {
-			t.Errorf("status leaked %q:\n%s", leaked, o.String())
+	for _, want := range []string{"not set", c.Product + " " + c.commandName() + " on/off"} {
+		if !strings.Contains(o.String(), want) {
+			t.Errorf("status %q should contain %q", o.String(), want)
 		}
 	}
 }
