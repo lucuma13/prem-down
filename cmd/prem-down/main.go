@@ -133,14 +133,14 @@ Usage: prem-down input.prproj [--to RELEASE]
        prem-down production.prodset [--to RELEASE]
 
 Options:
-  --to RELEASE    target Premiere release (e.g. %s default: one version older).
-  -v, --verbose   report what was written, and detailed logs (silent otherwise)
-      --version   show version
+  --to RELEASE    target Premiere release (e.g. %s default: one version older)
   -h, --help      show this help menu
+  -v, --verbose   enable verbose output
+      --version   show version
 
 Subcommands:
-  integrate       right-click downgrade action to %s: on / off
-  updates         check for new releases automatically: on / off
+  integrate [on|off]    right-click downgrade action in %s
+  updates [on|off]      check for new releases automatically
 `, premdown.ReleaseExamples(), integrate.FileManagerName)
 }
 
