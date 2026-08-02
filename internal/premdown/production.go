@@ -282,16 +282,10 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial copy
+	return fillNew(out, dst, func(w io.Writer) error {
+		_, err := io.Copy(w, in)
 		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(dst) //nolint:gosec // G703: dst is the O_EXCL path we just created above; removing our own partial copy
-		return err
-	}
-	return nil
+	})
 }
 
 // productionTarget resolves the one version every file in the Production will
