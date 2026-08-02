@@ -165,7 +165,9 @@ type Upgrade struct {
 // Three deliberate differences from Notify:
 //
 //   - It never asks (only executes if the user already opted in).
-//   - It ignores the throttle..
+//   - It ignores both throttles: it always requests, and it reports however
+//     recently the weekly reminder was last shown. This one answers a warning
+//     already on screen rather than volunteering a reminder.
 //   - It returns rather than prints ("an update is available and may
 //     recognise that file").
 func (c *Checker) CheckNow() *Upgrade {

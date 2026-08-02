@@ -1,9 +1,8 @@
-// Package updates is a portable, opt-in GitHub release update checker.
+// Package updates is a portable, opt-in GitHub release update check.
 //
-// It asks once whether to look for new releases, remembers the answer forever,
-// and - if the answer was yes - contacts GitHub's "latest release" API to
-// report that a newer version exists. It is notify-only: a one-line notice
-// naming the right upgrade command is the whole feature.
+// It asks once whether to look for new releases, remembers the answer and - if
+// the answer was yes - contacts GitHub's "latest release" API to report that a
+// newer version exists.
 package updates
 
 import (
@@ -55,7 +54,7 @@ const (
 // for a late answer to land in.
 const requestTimeout = 3 * time.Second
 
-// Checker is the whole feature: consent, throttle, request and notice. Repo,
+// Checker is the whole feature: consent, throttles, request and notice. Repo,
 // Product and Version are required; every other field has a working default,
 // and exists so tests (and unusual hosts) can substitute their own.
 type Checker struct {
