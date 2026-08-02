@@ -53,11 +53,11 @@ do {
 // at 4x, and ffmpeg downsamples to the committed asset.
 //
 // windowWidth is set by the menus rather than the file list.
-let pageMargin: CGFloat = 12
-let paneGap: CGFloat = 12
+let pageMargin: CGFloat = 18
+let paneGap: CGFloat = 18
 let windowWidth: CGFloat = 401
 let canvasWidth: CGFloat = pageMargin * 2 + windowWidth * 2 + paneGap
-let canvasHeight: CGFloat = 414
+let canvasHeight: CGFloat = 426
 let renderScale: CGFloat = 4
 /// Device-pixel ratio the committed asset targets.
 let exportScale: CGFloat = 2
@@ -233,8 +233,10 @@ let winMenuHover = color(hex: 0xe6e5e4)
 
 // MARK: - Layout
 
-let windowTopY: CGFloat = 12
+let windowTopY: CGFloat = 14
 let windowHeight: CGFloat = 390
+let windowShadowBlur: CGFloat = 12
+let windowShadowOffsetY: CGFloat = 4
 let sidebarWidth: CGFloat = 108
 let rowHeight: CGFloat = 27
 
@@ -483,7 +485,9 @@ func drawMacChrome(_ pane: Pane) {
         centreY: windowTopY + 19)
 
     // Sidebar: one section header and its items, enough to read as Finder.
-    drawText("Favourites", font: macFont(10.5, semibold: true), color: macDimText, leftX: pane.x + 14, centreY: windowTopY + 54)
+    drawText(
+        "Favourites", font: macFont(10.5, semibold: true), color: macDimText, leftX: pane.x + 14,
+        centreY: windowTopY + 54)
     let sidebarItems = [("Pictures", "photo.fill"), ("Movies", "film.fill"), ("Projects", "folder.fill")]
     for (index, item) in sidebarItems.enumerated() {
         let centreY = windowTopY + 76 + CGFloat(index) * 24
@@ -568,7 +572,9 @@ func drawFileRows(_ pane: Pane, rows: [FileRow], selected: Int?, resultAlpha: CG
 
         if selected == index {
             if mac {
-                fill(topRect(pane.contentX + 4, top + 1, listWidth - 8, rowHeight - 2), macAccent.withAlphaComponent(0.92))
+                fill(
+                    topRect(pane.contentX + 4, top + 1, listWidth - 8, rowHeight - 2),
+                    macAccent.withAlphaComponent(0.92))
             } else {
                 let rect = topRect(pane.contentX + 5, top + 1, listWidth - 10, rowHeight - 2)
                 winSelectBg.setFill()
@@ -700,7 +706,8 @@ func drawMenu(
 let macMenuLeft = macPane.contentX + macPane.menuOffset
 let macMenuTop = macPane.listTopY + CGFloat(targetIndex) * rowHeight + 14
 let macMenuW = menuWidth(macMenuItems, font: macFont(13), gutter: 30, trailing: 34)
-let macSubmenuTop = menuItemTop(macMenuItems, index: macQuickActionsIndex, topY: macMenuTop, rowHeight: macMenuRowHeight) - 5
+let macSubmenuTop =
+    menuItemTop(macMenuItems, index: macQuickActionsIndex, topY: macMenuTop, rowHeight: macMenuRowHeight) - 5
 let macSubmenuW = menuWidth(macSubmenuItems, font: macFont(13), gutter: 30, trailing: 22)
 // Opened to the left of its parent, overlapping it by a few points, which is
 // what Finder does when the submenu will not fit to the right.
@@ -771,7 +778,7 @@ func drawPane(_ pane: Pane, _ frame: Frame) {
     // Window body, clipped to its rounded rect so the chrome corners are right.
     let windowRect = topRect(pane.x, windowTopY, windowWidth, windowHeight)
     let radius: CGFloat = mac ? 10 : 8
-    withShadow(26, 0.20, 8) {
+    withShadow(windowShadowBlur, 0.16, windowShadowOffsetY) {
         macWindowBg.setFill()
         roundedRect(windowRect, radius: radius).fill()
     }
@@ -853,18 +860,18 @@ func renderFrame(_ frame: Frame, to path: String) {
 // MARK: - Timeline
 
 let frames: [Frame] = [
-    Frame(durationMs: 1100),                                                                    // idle
-    Frame(selected: true, durationMs: 450),                                                     // row selected
-    Frame(selected: true, menuLevel: 1, durationMs: 780),                                       // context menu
+    Frame(durationMs: 1100),  // idle
+    Frame(selected: true, durationMs: 450),  // row selected
+    Frame(selected: true, menuLevel: 1, durationMs: 780),  // context menu
     Frame(selected: true, menuLevel: 1, cursorStage: .primary, durationMs: 120),
     Frame(selected: true, menuLevel: 1, hoverStep: true, cursorStage: .primary, durationMs: 700),
-    Frame(selected: true, menuLevel: 2, cursorStage: .primary, durationMs: 320),                // second level opens
+    Frame(selected: true, menuLevel: 2, cursorStage: .primary, durationMs: 320),  // second level opens
     Frame(selected: true, menuLevel: 2, cursorStage: .secondary, durationMs: 260),
     Frame(selected: true, menuLevel: 2, hoverAction: true, cursorStage: .secondary, durationMs: 900),
-    Frame(selected: true, menuLevel: 2, cursorStage: .secondary, durationMs: 110),              // click flash off
+    Frame(selected: true, menuLevel: 2, cursorStage: .secondary, durationMs: 110),  // click flash off
     Frame(selected: true, menuLevel: 2, hoverAction: true, cursorStage: .secondary, durationMs: 150),
-    Frame(selected: true, cursorStage: .secondary, durationMs: 300),                            // menus close
-    Frame(selected: true, resultAlpha: 0.45, cursorStage: .result, durationMs: 140),            // copy appears
+    Frame(selected: true, cursorStage: .secondary, durationMs: 300),  // menus close
+    Frame(selected: true, resultAlpha: 0.45, cursorStage: .result, durationMs: 140),  // copy appears
     Frame(selected: true, resultAlpha: 1, cursorStage: .result, durationMs: 1900),
 ]
 
