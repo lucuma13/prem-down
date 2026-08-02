@@ -29,14 +29,10 @@ It fully supports the breaking changes introduced with **Premiere Pro 2026**. Th
 
 ### 📖 Usage
 
-The tool is available on the context menu (right-click on any Premiere Pro project file) or via Terminal. It creates a downgraded copy, always leaving the original untouched.
 
 #### Context Menu Integration
 
-Downgrade any project (.prproj) or a whole Production (.prodset) to the previous release:
-
-* macOS Finder: right-click any Premiere Pro project file(s) and choose "Quick Actions > Downgrade for older Premiere"
-* Windows File Explorer: right-click any Premiere Pro project file(s) and choose "Show more options > Downgrade for older Premiere"
+<img src="docs/assets/prem-down_demo.gif" width=100% alt="Right-clicking a .prproj in Finder and in File Explorer, choosing Downgrade for older Premiere, and the downgraded copy appearing next to the original"/>
 
 #### CLI (Terminal)
 

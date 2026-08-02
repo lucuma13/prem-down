@@ -34,8 +34,10 @@ pre-commit: ## Run all pre-commit hooks
 test: ## Run the test suite
 	go test -coverprofile=coverage.out -covermode=atomic ./...
 
-render: ## Regenerate the committed icon artwork
+render: ## Regenerate the committed artwork (icons, banner, social preview, demo GIF)
 	./scripts/render/icons.sh
+	./scripts/render/artwork.sh
+	swift ./scripts/render/demo_animation.swift
 
 install: ## Install to $GOBIN and integrate the right-click action (macOS/Windows)
 	go install -trimpath -ldflags '$(LDFLAGS)' $(PKG)
