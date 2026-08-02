@@ -34,7 +34,7 @@ pre-commit: ## Run all pre-commit hooks
 test: ## Run the test suite
 	go test -coverprofile=coverage.out -covermode=atomic ./...
 
-render: ## Regenerate the committed artwork (icons, banner, social preview, demo GIF)
+render: ## Regenerate the committed artwork (icons, banner, social preview, demo animation)
 	./scripts/render/icons.sh
 	./scripts/render/artwork.sh
 	swift ./scripts/render/demo_animation.swift

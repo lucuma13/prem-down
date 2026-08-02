@@ -15,14 +15,15 @@ import AppKit
 // the script falls back to a generic document glyph, so a contributor with no
 // Premiere install can still run a preview.
 //
-// Usage: swift demo_animation.swift   (requires ffmpeg: brew install ffmpeg)
+// Usage: swift demo_animation.swift
+//        (requires ffmpeg and img2webp: brew install ffmpeg webp)
 
 // MARK: - Config
 
 let projectRoot =
     URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-let outputGif = projectRoot.appendingPathComponent("docs/assets/prem-down_demo.gif").path
+let outputPath = projectRoot.appendingPathComponent("docs/assets/prem-down_demo.webp").path
 let quickActionIconPath = projectRoot.appendingPathComponent(
     "internal/integrate/workflowCustomImageTemplate.tiff"
 ).path
@@ -40,7 +41,7 @@ let premiereIconPath: String? = {
     return nil
 }()
 
-// Scratch dir for the intermediate PNG frames + ffmpeg concat manifest.
+// Scratch dir for the intermediate PNG frames, both supersampled and scaled.
 let outputDir = NSTemporaryDirectory() + "prem-down-demo-\(ProcessInfo.processInfo.processIdentifier)"
 do {
     try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
@@ -49,10 +50,17 @@ do {
 }
 
 // The layout is authored in these logical points. renderScale draws each frame
-// at 3x, and ffmpeg downsamples to the committed asset.
-let canvasWidth: CGFloat = 1248
-let canvasHeight: CGFloat = 450
-let renderScale: CGFloat = 3
+// at 4x, and ffmpeg downsamples to the committed asset.
+//
+// windowWidth is set by the menus rather than the file list.
+let pageMargin: CGFloat = 12
+let paneGap: CGFloat = 12
+let windowWidth: CGFloat = 401
+let canvasWidth: CGFloat = pageMargin * 2 + windowWidth * 2 + paneGap
+let canvasHeight: CGFloat = 414
+let renderScale: CGFloat = 4
+/// Device-pixel ratio the committed asset targets.
+let exportScale: CGFloat = 2
 
 // MARK: - Colour + image helpers
 
@@ -152,7 +160,7 @@ func fill(_ rect: NSRect, _ fillColor: NSColor) {
     rect.fill()
 }
 
-/// A hairline. Rects are pixel-snapped by the 3x supersample, so a 1pt line is
+/// A hairline. Rects are pixel-snapped by the supersample, so a 1pt line is
 /// safe to draw as a filled rect.
 func hairline(x: CGFloat, y: CGFloat, width: CGFloat, _ lineColor: NSColor) {
     fill(topRect(x, y, width, 1), lineColor)
@@ -220,22 +228,26 @@ let winAccent = color(hex: 0x0067c0)
 let winMenuBg = color(hex: 0xf7f6f5, alpha: 0.99)
 let winMenuHover = color(hex: 0xe6e5e4)
 
-// Page background - a soft neutral so both window chromes read as windows.
-let pageTop = color(hex: 0xdfe3ea)
-let pageBottom = color(hex: 0xc9cfd9)
+// The page behind the windows is left transparent so the asset sits on
+// whichever background GitHub is rendering.
 
 // MARK: - Layout
 
-let windowTopY: CGFloat = 38
+let windowTopY: CGFloat = 12
 let windowHeight: CGFloat = 390
-let windowWidth: CGFloat = 576
-let sidebarWidth: CGFloat = 132
+let sidebarWidth: CGFloat = 108
 let rowHeight: CGFloat = 27
 
 struct Pane {
     let x: CGFloat
     let platform: Platform
-    let caption: String
+
+    /// Where along the row the right-click lands, which is where the context
+    /// menu opens. Finder's is deliberately further along the filename: it puts
+    /// the menu near the window's right edge, which is what makes Finder flip
+    /// the Quick Actions submenu to the left - and that flip is what lets the
+    /// whole composition be this narrow.
+    var menuOffset: CGFloat { platform == .mac ? 126 : 46 }
 
     var contentX: CGFloat { x + sidebarWidth }
     var right: CGFloat { x + windowWidth }
@@ -246,14 +258,13 @@ struct Pane {
     }
 }
 
-let macPane = Pane(x: 24, platform: .mac, caption: "macOS")
-let winPane = Pane(x: 648, platform: .windows, caption: "Windows")
+let macPane = Pane(x: pageMargin, platform: .mac)
+let winPane = Pane(x: pageMargin + windowWidth + paneGap, platform: .windows)
 
 enum RowKind { case project, folder }
 struct FileRow {
     let name: String
     let kind: RowKind
-    let modified: String
     /// The downgraded copy, which only exists after the action has run.
     var isResult = false
 }
@@ -263,12 +274,12 @@ let resultName = "MyProject_downgraded.prproj"
 
 // Folders sort above files, as both shells do by default.
 let baseRows: [FileRow] = [
-    FileRow(name: "MyProduction", kind: .folder, modified: "28 Jul 2026"),
-    FileRow(name: targetName, kind: .project, modified: "31 Jul 2026"),
-    FileRow(name: "Titles_v3.prproj", kind: .project, modified: "2 Jun 2026"),
+    FileRow(name: "MyProduction", kind: .folder),
+    FileRow(name: targetName, kind: .project),
+    FileRow(name: "Titles_v3.prproj", kind: .project),
 ]
 let targetIndex = 1
-let resultRow = FileRow(name: resultName, kind: .project, modified: "now", isResult: true)
+let resultRow = FileRow(name: resultName, kind: .project, isResult: true)
 
 // MARK: - Menu model
 
@@ -473,10 +484,7 @@ func drawMacChrome(_ pane: Pane) {
 
     // Sidebar: one section header and its items, enough to read as Finder.
     drawText("Favourites", font: macFont(10.5, semibold: true), color: macDimText, leftX: pane.x + 14, centreY: windowTopY + 54)
-    let sidebarItems = [
-        ("Documents", "doc.fill"), ("Pictures", "photo.fill"), ("Movies", "film.fill"),
-        ("Projects", "folder.fill"),
-    ]
+    let sidebarItems = [("Pictures", "photo.fill"), ("Movies", "film.fill"), ("Projects", "folder.fill")]
     for (index, item) in sidebarItems.enumerated() {
         let centreY = windowTopY + 76 + CGFloat(index) * 24
         let selected = item.0 == "Projects"
@@ -490,7 +498,6 @@ func drawMacChrome(_ pane: Pane) {
     // Column header
     let headerY = windowTopY + 38 + 12
     drawText("Name", font: macFont(11), color: macDimText, leftX: pane.contentX + 14, centreY: headerY)
-    drawText("Date Modified", font: macFont(11), color: macDimText, leftX: pane.right - 118, centreY: headerY)
     hairline(x: pane.contentX, y: windowTopY + 38 + 24, width: windowWidth - sidebarWidth, macHairline)
 }
 
@@ -531,10 +538,7 @@ func drawWindowsChrome(_ pane: Pane) {
     let navTop = addressY + 34
     fill(topRect(pane.x, navTop, sidebarWidth, windowTopY + windowHeight - navTop), winNavBg)
     fill(topRect(pane.contentX, navTop, 1, windowTopY + windowHeight - navTop), winHairline)
-    let navItems = [
-        ("Home", "house.fill"), ("Documents", "doc.fill"), ("Gallery", "photo.fill"),
-        ("Projects", "folder.fill"),
-    ]
+    let navItems = [("Home", "house.fill"), ("Gallery", "photo.fill"), ("Projects", "folder.fill")]
     for (index, item) in navItems.enumerated() {
         let centreY = navTop + 20 + CGFloat(index) * 24
         if item.0 == "Projects" {
@@ -548,7 +552,6 @@ func drawWindowsChrome(_ pane: Pane) {
     // Column header
     let headerY = navTop + 12
     drawText("Name", font: windowsFont(11), color: winDimText, leftX: pane.contentX + 14, centreY: headerY)
-    drawText("Date modified", font: windowsFont(11), color: winDimText, leftX: pane.right - 122, centreY: headerY)
     hairline(x: pane.contentX, y: navTop + 24, width: windowWidth - sidebarWidth, winHairline)
 }
 
@@ -585,12 +588,8 @@ func drawFileRows(_ pane: Pane, rows: [FileRow], selected: Int?, resultAlpha: CG
 
         let highlighted = selected == index && mac
         let nameColour = highlighted ? NSColor.white : (mac ? macText : winText)
-        let dateColour = highlighted ? NSColor.white.withAlphaComponent(0.8) : (mac ? macDimText : winDimText)
         let font = mac ? macFont(12.5) : windowsFont(12)
         drawText(row.name, font: font, color: nameColour.withAlphaComponent(alpha), leftX: iconX + 25, centreY: centreY)
-        drawText(
-            row.modified, font: mac ? macFont(11.5) : windowsFont(11.5),
-            color: dateColour.withAlphaComponent(alpha), leftX: pane.right - 118, centreY: centreY)
     }
 }
 
@@ -698,14 +697,16 @@ func drawMenu(
 
 // MARK: - Menu geometry
 
-let macMenuLeft = macPane.contentX + 46
+let macMenuLeft = macPane.contentX + macPane.menuOffset
 let macMenuTop = macPane.listTopY + CGFloat(targetIndex) * rowHeight + 14
 let macMenuW = menuWidth(macMenuItems, font: macFont(13), gutter: 30, trailing: 34)
 let macSubmenuTop = menuItemTop(macMenuItems, index: macQuickActionsIndex, topY: macMenuTop, rowHeight: macMenuRowHeight) - 5
-let macSubmenuLeft = macMenuLeft + macMenuW - 5
 let macSubmenuW = menuWidth(macSubmenuItems, font: macFont(13), gutter: 30, trailing: 22)
+// Opened to the left of its parent, overlapping it by a few points, which is
+// what Finder does when the submenu will not fit to the right.
+let macSubmenuLeft = macMenuLeft + 5 - macSubmenuW
 
-let winMenuLeft = winPane.contentX + 46
+let winMenuLeft = winPane.contentX + winPane.menuOffset
 let winMenuTop = winPane.listTopY + CGFloat(targetIndex) * rowHeight + 14
 let winMenuW = menuWidth(
     winMenuItems, font: windowsFont(12), gutter: 30, trailing: 34, shortcutFont: windowsFont(11))
@@ -736,10 +737,11 @@ func cursorPoint(_ pane: Pane, _ stage: CursorStage) -> NSPoint? {
     case .hidden:
         return nil
     case .row:
-        return NSPoint(x: pane.contentX + 48, y: rowCentre - 3)
+        // On the click point, so the menu appears under the pointer.
+        return NSPoint(x: pane.contentX + pane.menuOffset + 2, y: rowCentre - 3)
     case .result:
         // Resting on the downgraded copy, so the eye lands on the payoff.
-        return NSPoint(x: pane.contentX + 48, y: rowCentre + rowHeight - 3)
+        return NSPoint(x: pane.contentX + pane.menuOffset + 2, y: rowCentre + rowHeight - 3)
     case .primary:
         let items = mac ? macMenuItems : winMenuItems
         let index = mac ? macQuickActionsIndex : winShowMoreIndex
@@ -765,11 +767,6 @@ func cursorPoint(_ pane: Pane, _ stage: CursorStage) -> NSPoint? {
 
 func drawPane(_ pane: Pane, _ frame: Frame) {
     let mac = pane.platform == .mac
-
-    // Caption above the window, set in the platform's own UI face.
-    drawText(
-        pane.caption, font: mac ? macFont(12, semibold: true) : windowsFont(12, semibold: true),
-        color: color(hex: 0x5b6473), leftX: pane.x + 3, centreY: 20)
 
     // Window body, clipped to its rounded rect so the chrome corners are right.
     let windowRect = topRect(pane.x, windowTopY, windowWidth, windowHeight)
@@ -829,12 +826,6 @@ func drawPane(_ pane: Pane, _ frame: Frame) {
 
 // MARK: - Render one frame
 
-func drawBackground() {
-    guard let gradient = NSGradient(colors: [pageTop, pageBottom], atLocations: [0, 1], colorSpace: .sRGB)
-    else { fatalError("gradient init failed") }
-    gradient.draw(in: NSRect(x: 0, y: 0, width: canvasWidth, height: canvasHeight), angle: -90)
-}
-
 func renderFrame(_ frame: Frame, to path: String) {
     guard
         let rep = NSBitmapImageRep(
@@ -847,7 +838,6 @@ func renderFrame(_ frame: Frame, to path: String) {
 
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
-    drawBackground()
     drawPane(macPane, frame)
     drawPane(winPane, frame)
     NSGraphicsContext.restoreGraphicsState()
@@ -882,26 +872,14 @@ for (index, frame) in frames.enumerated() {
     renderFrame(frame, to: String(format: "\(outputDir)/f%03d.png", index))
 }
 
-// ffmpeg concat manifest with per-frame durations (the last file is repeated,
-// as the concat demuxer ignores the final entry's duration).
-var concat = ""
-for (index, frame) in frames.enumerated() {
-    concat += "file 'f\(String(format: "%03d", index)).png'\nduration \(Double(frame.durationMs) / 1000)\n"
-}
-concat += "file 'f\(String(format: "%03d", frames.count - 1)).png'\n"
-do {
-    try concat.write(toFile: "\(outputDir)/concat.txt", atomically: true, encoding: .utf8)
-} catch {
-    fatalError("failed to write concat.txt: \(error)")
-}
+// MARK: - Stitch frames into the animation
 
-// MARK: - Stitch frames into the GIF (ffmpeg)
-
-func ffmpeg(_ args: [String]) {
+/// Runs `tool` and stops the render if it is missing or fails.
+func run(_ tool: String, _ args: [String], install: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["ffmpeg"] + args
-    process.standardOutput = FileHandle.nullDevice  // ffmpeg is chatty; stay quiet
+    process.arguments = [tool] + args
+    process.standardOutput = FileHandle.nullDevice  // both tools are chatty; stay quiet
     process.standardError = FileHandle.nullDevice
     // Detach stdin: with an inherited TTY, ffmpeg enters interactive mode and
     // blocks on a keypress read, hanging the render.
@@ -909,29 +887,29 @@ func ffmpeg(_ args: [String]) {
     do {
         try process.run()
     } catch {
-        fatalError("could not launch ffmpeg: \(error)")
+        fatalError("could not launch \(tool): \(error); install it: \(install)")
     }
     process.waitUntilExit()
     guard process.terminationStatus == 0 else {
-        fatalError("ffmpeg failed (\(process.terminationStatus)); install it: brew install ffmpeg")
+        fatalError("\(tool) failed (\(process.terminationStatus)); install it: \(install)")
     }
 }
 
-let filter = "scale=\(Int(canvasWidth)):\(Int(canvasHeight)):flags=lanczos"  // supersample down to the asset size
-let concatFile = "\(outputDir)/concat.txt"
-let palette = "\(outputDir)/palette.png"
-
-// Pass 1: optimised palette from the frames
-ffmpeg([
-    "-y", "-f", "concat", "-safe", "0", "-i", concatFile,
-    "-vf", "\(filter),palettegen=stats_mode=diff", palette,
-])
-// Pass 2: apply the palette and honour the per-frame durations
-ffmpeg([
-    "-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-i", palette,
-    "-lavfi", "\(filter)[x];[x][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
-    "-fps_mode", "vfr", "-loop", "0", outputGif,
-])
+// Downsample each supersampled frame to the asset size. Lanczos in ffmpeg
+// rather than a Core Graphics resize: it is the filter the output was tuned
+// against, and renderScale is an exact multiple of exportScale so every output
+// pixel is a clean block average.
+let scaled = "scale=\(Int(canvasWidth * exportScale)):\(Int(canvasHeight * exportScale)):flags=lanczos"
+var webpArgs = ["-loop", "0", "-lossy", "-q", "90", "-m", "6"]
+for (index, frame) in frames.enumerated() {
+    let source = String(format: "\(outputDir)/f%03d.png", index)
+    let target = String(format: "\(outputDir)/s%03d.png", index)
+    run("ffmpeg", ["-y", "-i", source, "-vf", scaled, target], install: "brew install ffmpeg")
+    // img2webp takes the delay in milliseconds immediately before its frame, so
+    // the timeline's per-frame durations carry over exactly.
+    webpArgs += ["-d", String(frame.durationMs), target]
+}
+run("img2webp", webpArgs + ["-o", outputPath], install: "brew install webp")
 
 try? FileManager.default.removeItem(atPath: outputDir)
-print("rendered \(outputGif)")
+print("rendered \(outputPath)")
