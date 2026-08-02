@@ -63,9 +63,18 @@ const (
 	// the text matches what the user will actually right-click in.
 	FileManagerName = "Finder"
 
-	integrationInstalledMessage = `Installed the Finder Quick Action: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
+	// quickActionHowTo tails both the "installed" and "already installed"
+	// messages: where to find the action is worth saying either way.
+	quickActionHowTo = `: right-click a .prproj file (or a .prodset file), and pick Quick Actions > ` + quickActionMenuTitle + `.
 If it doesn't appear, enable it with Quick Actions > Customise…`
-	integrationRemovedMessage = "Removed the Finder Quick Action."
+
+	integrationInstalledMessage   = "Installed the Finder Quick Action" + quickActionHowTo
+	integrationReinstalledMessage = "Re-installed the Finder Quick Action" + quickActionHowTo
+	integrationRemovedMessage     = "Removed the Finder Quick Action."
+
+	// The two states, as a bare "integrate" reports them.
+	integrationPresentMessage = "The Finder Quick Action is installed."
+	integrationAbsentMessage  = "The Finder Quick Action is not installed."
 
 	// serviceEnabledStatus is the NSServicesStatus value that marks the Quick
 	// Action as enabled in every Finder context. It carries both the modern
@@ -76,15 +85,14 @@ If it doesn't appear, enable it with Quick Actions > Customise…`
 )
 
 // quickActionScript is the Quick Action's shell step. Finder hands it the
-// selected files as arguments; results surface as a notification (success) or
-// a dialog (failure) since there is no terminal to print to. osascript
-// receives strings via argv, never by splicing them into the AppleScript
-// source, so paths and messages cannot break quoting.
+// selected files as arguments; osascript receives strings via argv, never by
+// splicing them into the AppleScript source, so paths and messages cannot break
+// quoting.
 //
 // --gui marks the run as launched from the file manager rather than a terminal,
-// which tells prem-down it may raise the update check's one-time question as a
-// dialog (see internal/updates). Windows reaches the same state without
-// the flag: its COM handler calls run directly.
+// which tells prem-down it may raise the update check's question - and its
+// notice - as a dialog. Windows reaches the same state without the flag: its
+// COM handler calls run directly.
 const quickActionScript = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 dialog() { /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) buttons {"OK"} default button 1 with title "prem-down" with icon caution' -e 'end run' "$1" >/dev/null; }
 for f in "$@"; do
@@ -95,9 +103,7 @@ for f in "$@"; do
     continue
     ;;
   esac
-  if out=$(prem-down --gui "$f" 2>&1); then
-    /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "prem-down"' -e 'end run' "$out" >/dev/null
-  else
+  if ! out=$(prem-down --gui "$f" 2>&1); then
     dialog "$out"
   fi
 done`

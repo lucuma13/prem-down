@@ -39,6 +39,7 @@ func newTestChecker(t *testing.T, version, tag string) (*Checker, *atomic.Int32)
 	c.Endpoint = srv.URL
 	c.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	c.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	c.Announce = func(Upgrade) bool { return false }
 	return c, &hits
 }
 
@@ -372,6 +373,53 @@ func TestNotifyAcceptsAndReports(t *testing.T) {
 	}
 }
 
+// On a surface that could put the question, the notice goes to that surface's
+// dialog rather than the writer.
+func TestNotifyAnnouncesOnTheAskingSurface(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.Ask = func(string, io.Reader, io.Writer) bool { return true }
+	var announced []Upgrade
+	c.Announce = func(u Upgrade) bool {
+		announced = append(announced, u)
+		return true
+	}
+
+	if got := notify(c, true); got != "" {
+		t.Errorf("an announced notice must not also be printed, got %q", got)
+	}
+	if len(announced) != 1 {
+		t.Fatalf("want one announcement, got %d: %v", len(announced), announced)
+	}
+	// The dialog is handed the upgrade itself, not a sentence: it labels its
+	// action button with the verb and runs the target when that button is
+	// pressed, so both have to arrive intact.
+	if got := announced[0]; got.Version != "v1.1.0" || got.Verb == "" || got.Target == "" {
+		t.Errorf("announced upgrade is incomplete: %+v", got)
+	}
+
+	// A terminal run is never announced to, whatever the platform can raise.
+	c2, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	if err := c2.save(settings{Updates: stateOn, LatestSeen: "v1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	c2.Announce = func(Upgrade) bool { t.Error("a terminal run must not raise a dialog"); return true }
+	if got := notify(c2, false); !strings.Contains(got, "is available") {
+		t.Errorf("a terminal run should print the notice, got %q", got)
+	}
+}
+
+// A dialog that cannot be raised must not swallow the notice: announce reports
+// that it did not show, and the notice is printed after all.
+func TestNotifyPrintsWhenTheDialogFails(t *testing.T) {
+	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+	c.Ask = func(string, io.Reader, io.Writer) bool { return true }
+	c.Announce = func(Upgrade) bool { return false }
+
+	if got := notify(c, true); !strings.Contains(got, "is available") {
+		t.Errorf("a failed announcement should fall back to printing, got %q", got)
+	}
+}
+
 // The request is throttled but the notice is not: a pending upgrade keeps being
 // reported from the cached version while GitHub is left alone.
 func TestNotifyThrottlesRequestsNotNotices(t *testing.T) {
@@ -542,28 +590,28 @@ func TestCommand(t *testing.T) {
 
 	// A bare invocation reports and changes nothing.
 	code, out, _ := run()
-	if code != 0 || !strings.Contains(out, "not set") {
+	if code != 0 || !strings.Contains(out, "Update checks are not set.") {
 		t.Errorf("bare status: code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "my-tool updates on/off") {
+		t.Errorf("unset status should name how to set it, got %q", out)
 	}
 	if _, err := os.Stat(c.ConfigPath); !os.IsNotExist(err) {
 		t.Error("status must not create the settings file")
 	}
 
-	if code, out, _ = run("on"); code != 0 || !strings.Contains(out, "updates: on") {
+	if code, out, _ = run("on"); code != 0 || !strings.Contains(out, "Update checks are on.") {
 		t.Errorf("on: code=%d out=%q", code, out)
 	}
 	if s, _ := c.load(); s.Updates != stateOn {
 		t.Error("on should persist")
 	}
 	// A bare invocation must report the stored setting without changing it.
-	if code, out, _ = run(); code != 0 || !strings.Contains(out, "updates: on") {
+	if code, out, _ = run(); code != 0 || !strings.Contains(out, "Update checks are on.") {
 		t.Errorf("status: code=%d out=%q", code, out)
 	}
-	if !strings.Contains(out, c.ConfigPath) {
-		t.Errorf("status should name the settings file, got %q", out)
-	}
 
-	if code, out, _ = run("off"); code != 0 || !strings.Contains(out, "updates: off") {
+	if code, out, _ = run("off"); code != 0 || !strings.Contains(out, "Update checks are off.") {
 		t.Errorf("off: code=%d out=%q", code, out)
 	}
 	if s, _ := c.load(); s.Updates != stateOff || s.LatestSeen != "" {
@@ -575,6 +623,47 @@ func TestCommand(t *testing.T) {
 	}
 	if code, _, errw := run("maybe"); code != 1 || !strings.Contains(errw, "unknown action") {
 		t.Errorf("unknown action: code=%d err=%q", code, errw)
+	}
+}
+
+// Each action reports what it changed. The four transitions read differently.
+func TestCommandActionsReportWhatChanged(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		start  string
+		action string
+		want   string
+	}{
+		{"on from unset", stateUnset, "on", "Update checks are on."},
+		{"on from off", stateOff, "on", "Update checks are on."},
+		{"on when already on", stateOn, "on", "Update checks are already on."},
+		{"off from on", stateOn, "off", "Update checks are off."},
+		{"off when already off", stateOff, "off", "Update checks are already off."},
+		{"off from unset", stateUnset, "off", "Update checks are off."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
+			if tc.start != stateUnset {
+				if err := c.save(settings{Updates: tc.start}); err != nil {
+					t.Fatalf("seeding state: %v", err)
+				}
+			}
+			var o, e bytes.Buffer
+			if code := c.Command(&o, &e, []string{tc.action}); code != 0 {
+				t.Fatalf("%s returned %d (%q)", tc.action, code, e.String())
+			}
+			// One line, matched whole: "already off" must not pass for "off".
+			if got := strings.TrimSpace(o.String()); got != tc.want {
+				t.Errorf("%s said %q, want %q", tc.action, got, tc.want)
+			}
+			want := stateOn
+			if tc.action == "off" {
+				want = stateOff
+			}
+			if s, _ := c.load(); s.Updates != want {
+				t.Errorf("%s left the setting at %q, want %q", tc.action, s.Updates, want)
+			}
+		})
 	}
 }
 
@@ -606,9 +695,8 @@ func TestCommandReportsAFailedSave(t *testing.T) {
 	}
 }
 
-// Once a check has actually run, status reports when it happened and what it
-// found - the two facts that explain why (or why not) a notice is appearing.
-func TestCommandStatusReportsTheLastCheck(t *testing.T) {
+// Status reports the setting and nothing else.
+func TestCommandStatusReportsOnlyTheSetting(t *testing.T) {
 	c, _ := newTestChecker(t, "1.0.0", "v1.1.0")
 	checked := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	if err := c.save(settings{Updates: stateOn, LastChecked: checked, LatestSeen: "v1.1.0"}); err != nil {
@@ -618,9 +706,12 @@ func TestCommandStatusReportsTheLastCheck(t *testing.T) {
 	if code := c.Command(&o, &e, nil); code != 0 {
 		t.Fatalf("status: code=%d err=%q", code, e.String())
 	}
-	for _, want := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0"} {
-		if !strings.Contains(o.String(), want) {
-			t.Errorf("status output missing %q:\n%s", want, o.String())
+	if got := strings.TrimSpace(o.String()); got != "Update checks are on." {
+		t.Errorf("status = %q, want just the setting", got)
+	}
+	for _, leaked := range []string{"last checked", checked.Local().Format(time.RFC1123), "v1.1.0", c.ConfigPath} {
+		if strings.Contains(o.String(), leaked) {
+			t.Errorf("status leaked %q:\n%s", leaked, o.String())
 		}
 	}
 }

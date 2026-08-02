@@ -72,22 +72,45 @@ func TestIntegrateMainInstallAndRemove(t *testing.T) {
 			t.Errorf("status = %q, want %q", got, want)
 		}
 	}
-	status("integrate: off")
+	status(integrationAbsentMessage)
 	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
 		t.Errorf("a bare integrate should not install anything (stat err: %v)", err)
 	}
 
-	Run(io.Discard, io.Discard, []string{"on"})
+	// Each direction reports what actually changed.
+	action := func(arg, want string) {
+		t.Helper()
+		var out strings.Builder
+		if code := Run(&out, io.Discard, []string{arg}); code != 0 {
+			t.Fatalf("integrate %s should return 0, got %d", arg, code)
+		}
+		if got := strings.TrimSpace(out.String()); got != want {
+			t.Errorf("integrate %s said %q, want %q", arg, got, want)
+		}
+	}
+
+	action("off", integrationAbsentMessage) // nothing installed yet
+
+	action("on", integrationInstalledMessage)
 	if _, err := os.Stat(bundle); err != nil {
 		t.Fatalf("integrate on did not create the bundle: %v", err)
 	}
-	status("integrate: on")
+	status(integrationPresentMessage)
 
-	Run(io.Discard, io.Discard, []string{"off"})
+	action("on", integrationReinstalledMessage)
+	if _, err := os.Stat(bundle); err != nil {
+		t.Fatalf("a repeated integrate on must leave the bundle in place: %v", err)
+	}
+	status(integrationPresentMessage)
+
+	action("off", integrationRemovedMessage)
 	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
 		t.Errorf("integrate off left the bundle behind (stat err: %v)", err)
 	}
-	status("integrate: off")
+	status(integrationAbsentMessage)
+
+	action("off", integrationAbsentMessage)
+	status(integrationAbsentMessage)
 }
 
 // installIntegration must produce a complete Quick Action bundle under

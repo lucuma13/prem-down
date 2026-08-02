@@ -38,6 +38,13 @@ const DefaultInterval = 7 * 24 * time.Hour
 // help text.
 const DefaultCommandName = "updates"
 
+// The two upgrade verbs. They say what kind of thing Target is - which is what
+// every caller branches on to decide whether it can be executed.
+const (
+	verbRun      = "Run"      // Target is a command to execute
+	verbDownload = "Download" // Target is a page to open
+)
+
 // requestTimeout bounds the whole check. The real work is already done by the
 // time this runs, so the only thing at stake is how long the console window (or
 // the desktop notification) is held back; three seconds is short enough that a
@@ -65,6 +72,7 @@ type Checker struct {
 	Question    string                                                  // "" => a default phrased around Product
 	Now         func() time.Time                                        // nil => time.Now
 	Ask         func(question string, in io.Reader, out io.Writer) bool // nil => the platform prompt
+	Announce    func(u Upgrade) bool                                    // nil => the platform notice dialog
 }
 
 // New builds a Checker with every default in place.
@@ -267,11 +275,11 @@ func (c *Checker) upgradeHintForPath(exe string) (verb, target string) {
 	owner, _, _ := strings.Cut(c.Repo, "/")
 	switch {
 	case slices.Contains(parts, "Caskroom") || slices.Contains(parts, "Cellar"):
-		return "Run", "brew upgrade " + c.Product
+		return verbRun, "brew upgrade " + c.Product
 	case slices.Contains(parts, "WinGet"):
-		return "Run", "winget upgrade -e --id " + strings.ToLower(owner) + "." + c.Product
+		return verbRun, "winget upgrade -e --id " + strings.ToLower(owner) + "." + c.Product
 	}
-	return "Download", c.releasesPage()
+	return verbDownload, c.releasesPage()
 }
 
 func (c *Checker) upgradeHint() (verb, target string) {

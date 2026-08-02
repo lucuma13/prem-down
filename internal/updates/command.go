@@ -7,7 +7,6 @@ package updates
 import (
 	"fmt"
 	"io"
-	"time"
 )
 
 func (c *Checker) commandName() string {
@@ -31,6 +30,20 @@ With no action, the current status is shown.
 Options:
   -h, --help  show this help
 `, c.Product, c.Product, c.commandName())
+}
+
+// reportAction confirms the setting the user just applied.
+func reportAction(out io.Writer, action, was string) {
+	switch {
+	case action == "on" && was == stateOn:
+		_, _ = fmt.Fprintln(out, "Update checks are already on.")
+	case action == "on":
+		_, _ = fmt.Fprintln(out, "Update checks are on.")
+	case was == stateOff:
+		_, _ = fmt.Fprintln(out, "Update checks are already off.")
+	default:
+		_, _ = fmt.Fprintln(out, "Update checks are off.")
+	}
 }
 
 // Command executes the updates subcommand and returns the process exit code
@@ -61,35 +74,32 @@ func (c *Checker) Command(out, errw io.Writer, args []string) int {
 		return fatal("error: %v", err)
 	}
 
-	switch action {
-	case "on":
-		s.Updates = stateOn
-	case "off":
-		s.Updates = stateOff
-		s.LatestSeen = "" // drop any pending notice along with the setting
-	}
+	// An action reports what it changed rather than restating the resulting
+	// state. The status report is left to a bare invocation.
 	if action != "" {
+		was := s.Updates
+		switch action {
+		case "on":
+			s.Updates = stateOn
+		case "off":
+			s.Updates = stateOff
+			s.LatestSeen = "" // drop any pending notice along with the setting
+		}
 		if err := c.save(s); err != nil {
 			return fatal("error: %v", err)
 		}
+		reportAction(out, action, was)
+		return 0
 	}
 
-	path, err := c.configPath()
-	if err != nil {
-		return fatal("error: %v", err)
-	}
 	switch s.Updates {
 	case stateOn:
-		_, _ = fmt.Fprintf(out, "%s: on\n", c.commandName())
+		_, _ = fmt.Fprintln(out, "Update checks are on.")
 	case stateOff:
-		_, _ = fmt.Fprintf(out, "%s: off\n", c.commandName())
+		_, _ = fmt.Fprintln(out, "Update checks are off.")
 	default:
-		_, _ = fmt.Fprintf(out, "%s: not set (nothing is checked until you are asked, or set it here)\n", c.commandName())
-	}
-	_, _ = fmt.Fprintf(out, "settings file: %s\n", path)
-	if s.Updates == stateOn && !s.LastChecked.IsZero() {
-		_, _ = fmt.Fprintf(out, "last checked: %s (latest release: %s)\n",
-			s.LastChecked.Local().Format(time.RFC1123), s.LatestSeen)
+		_, _ = fmt.Fprintf(out, "Update checks are not set.\n"+
+			"Set them with %s %s on/off\n", c.Product, c.commandName())
 	}
 	return 0
 }

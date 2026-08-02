@@ -134,7 +134,7 @@ Usage: prem-down input.prproj [--to RELEASE]
 
 Options:
   --to RELEASE    target Premiere release (e.g. %s default: one version older).
-  -v, --verbose   print detailed logs
+  -v, --verbose   report what was written, and detailed logs (silent otherwise)
       --version   show version
   -h, --help      show this help menu
 
@@ -160,7 +160,7 @@ func comDowngrade(files []string) (string, bool) {
 }
 
 // dialogRun runs files through a cli whose streams are buffers and folds the
-// result into dialog text.
+// result into dialog text. An empty summary means there is nothing to show.
 func dialogRun(checker *updates.Checker, files []string) (string, bool) {
 	var out, errOut bytes.Buffer
 	c := &cli{
@@ -171,7 +171,15 @@ func dialogRun(checker *updates.Checker, files []string) (string, bool) {
 		checker: checker,
 	}
 	code := c.run(files)
-	return comSummary(out.String(), errOut.String()), code != 0 && code != exitUnrecognisedRelease
+	// A clean run says nothing: the converted file sitting next to the original
+	// is the result, and a box repeating it is one more thing to dismiss. This
+	// is the macOS Quick Action's rule too - it raises a dialog only when the
+	// exit code is non-zero - and an unrecognised release keeps its box on both,
+	// because that one carries a warning worth reading.
+	if code == 0 {
+		return "", false
+	}
+	return comSummary(out.String(), errOut.String()), code != exitUnrecognisedRelease
 }
 
 // comSummary folds a run's two streams into one block of dialog text: failures
@@ -299,7 +307,18 @@ func (c *cli) run(args []string) int {
 			failed = true
 			continue
 		}
-		_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
+		// A terminal run is silent unless asked: the converted file next to the
+		// original is the result, so a clean run has nothing to add, and no output
+		// means nothing went wrong.
+		//
+		// A file-manager run always records it, because that surface reports once
+		// or not at all: a selection where one file failed shows a dialog, and it
+		// has to say which files did convert as well as which did not. Nothing is
+		// shown when every file converted (dialogRun drops a clean run's output),
+		// so this cannot become the success message it replaced.
+		if verbose || c.gui {
+			_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
+		}
 	}
 	// Only after a clean batch: a run that already reported an error is not a
 	// place to ask the user about update checks.

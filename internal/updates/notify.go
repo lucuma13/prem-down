@@ -6,19 +6,16 @@ package updates
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
-// question is the first-run prompt. It names what the check actually does,
-// because the thing being consented to is the one network request the host
-// program makes.
+// question is the first-run prompt: one line, phrased around Product..
 func (c *Checker) question() string {
 	if c.Question != "" {
 		return c.Question
 	}
-	return fmt.Sprintf("Check for new %s versions automatically?\n"+
-		"This contacts GitHub about once a week to compare version numbers. "+
-		"Your files are never uploaded.", c.Product)
+	return fmt.Sprintf("Do you want %s to check for updates automatically?", c.Product)
 }
 
 func (c *Checker) now() time.Time {
@@ -40,6 +37,31 @@ func (c *Checker) prompt(in io.Reader, out io.Writer) bool {
 		return c.Ask(c.question(), in, out)
 	}
 	return c.ask(c.question(), in, out)
+}
+
+// announce offers the upgrade to the platform's dialog, reporting whether it
+// was shown. False means the caller must print it instead - either because this
+// platform shows the run's output some other way, or because the dialog could
+// not be raised.
+func (c *Checker) announce(u Upgrade) bool {
+	if c.Announce != nil {
+		return c.Announce(u)
+	}
+	return c.announceDialog(u)
+}
+
+// noticeText is the upgrade notice: what's new, and how to update.
+func (c *Checker) noticeText(u Upgrade) string {
+	target := u.Target
+	if u.Verb == verbRun {
+		target = "'" + target + "'"
+	}
+	return fmt.Sprintf("%s %s is available.\n%s: %s", c.Product, u.Version, u.Verb, target)
+}
+
+// plainVersion renders a version bare, without the "v" a release tag may carry.
+func plainVersion(version string) string {
+	return strings.TrimPrefix(version, "v")
 }
 
 // Notify is called once per run, after the host program's real work has
@@ -107,7 +129,16 @@ func (c *Checker) Notify(out io.Writer, in io.Reader, mayAsk bool) {
 		return
 	}
 	verb, target := c.upgradeHint()
-	_, _ = fmt.Fprintf(out, "\n%s %s is available. %s: %s\n", c.Product, s.LatestSeen, verb, target)
+	u := Upgrade{Version: s.LatestSeen, Verb: verb, Target: target}
+
+	// On the surface that could put the question, the notice belongs in a
+	// dialog too: a file-manager run has nowhere to print to, and its output
+	// may be discarded entirely. Printing is the fallback, and the only path a
+	// terminal run takes.
+	if mayAsk && c.announce(u) {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "\n%s\n", c.noticeText(u))
 }
 
 // Upgrade is a newer release that is available, and how to get it.

@@ -99,12 +99,17 @@ func TestDropTargetServerSurvivesRegistration(t *testing.T) {
 // closing it would hang every context-menu conversion.
 func TestRunAndReport(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		summary string
-		failed  bool
+		name      string
+		summary   string
+		failed    bool
+		wantShown int
 	}{
-		{"success", "wrote a_downgraded.prproj", false},
-		{"failure", "error: a.prproj: not a Premiere project", true},
+		// A clean run puts nothing on screen - but the server must still be
+		// released.
+		{"clean run", "", false, 0},
+		// A warning is not a failure: it keeps its box.
+		{"warning", "converted on an assumption about release 26", false, 1},
+		{"failure", "error: a.prproj: not a Premiere project", true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			restoreServerState(t)
@@ -128,13 +133,14 @@ func TestRunAndReport(t *testing.T) {
 			if len(gotFiles) != len(want) || gotFiles[0] != want[0] || gotFiles[1] != want[1] {
 				t.Errorf("downgrader got %v, want %v", gotFiles, want)
 			}
-			// Exactly one report for the whole selection, however many files it
+			// At most one report for the whole selection, however many files it
 			// held - that is the point of receiving the drop as one call rather
-			// than letting Explorer invoke a command verb per file.
-			if shown != 1 {
-				t.Fatalf("the outcome was reported %d times, want exactly 1", shown)
+			// than letting Explorer invoke a command verb per file - and none at
+			// all when there is nothing to say.
+			if shown != tc.wantShown {
+				t.Fatalf("the outcome was reported %d times, want %d", shown, tc.wantShown)
 			}
-			if gotSummary != tc.summary || gotFailed != tc.failed {
+			if tc.wantShown > 0 && (gotSummary != tc.summary || gotFailed != tc.failed) {
 				t.Errorf("reported %q/%v, want %q/%v", gotSummary, gotFailed, tc.summary, tc.failed)
 			}
 			select {

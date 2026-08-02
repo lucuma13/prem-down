@@ -335,8 +335,11 @@ func runAndReport(files []string) {
 	defer close(workDone)
 	defer call(procPostThreadMessageW, serverThreadID, wmQuit, 0, 0)
 
-	summary, bad := downgrade(files)
-	showResult(summary, bad)
+	// An empty summary is a clean run. The check is here so a test can stub
+	// that and still observe that nothing was shown.
+	if summary, bad := downgrade(files); summary != "" {
+		showResult(summary, bad)
+	}
 }
 
 // showResult puts the outcome in front of the user. It is a variable so the

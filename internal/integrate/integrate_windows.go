@@ -40,9 +40,18 @@ const (
 	// FileManagerName is this platform's file manager (named in the CLI help).
 	FileManagerName = "File Explorer"
 
-	integrationInstalledMessage = `Installed the File Explorer context-menu entries: right-click a .prproj file,
+	// contextMenuHowTo tails both the "installed" and "already installed"
+	// messages: where to find the entry is worth saying either way.
+	contextMenuHowTo = `: right-click a .prproj file,
 (or a .prodset file), and pick "` + contextMenuTitle + `".`
-	integrationRemovedMessage = "Removed the File Explorer context-menu entries."
+
+	integrationInstalledMessage   = "Installed the File Explorer context-menu entries" + contextMenuHowTo
+	integrationReinstalledMessage = "Re-installed the File Explorer context-menu entries" + contextMenuHowTo
+	integrationRemovedMessage     = "Removed the File Explorer context-menu entries."
+
+	// The two states, as a bare "integrate" reports them.
+	integrationPresentMessage = "The File Explorer context-menu entries are installed."
+	integrationAbsentMessage  = "The File Explorer context-menu entries are not installed."
 )
 
 // contextMenuKeys are the verb keys, one per file type the entry appears on.

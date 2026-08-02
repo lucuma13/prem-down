@@ -18,10 +18,10 @@ import (
 )
 
 // Downgrader converts one file-manager selection and returns what to tell the
-// user: a summary to show, and whether anything failed. Only the Windows COM
-// handler calls one - it does the work in-process and reports in a message box
-// - but the type is declared here so MaybeRunCOMServer has the same signature
-// on every platform.
+// user: a summary to show, and whether anything failed. An empty summary means
+// a clean run. Only the Windows COM handler calls one - it does the work
+// in-process and reports in a message box - but the type is declared here so
+// MaybeRunCOMServer has the same signature on every platform.
 type Downgrader func(files []string) (summary string, failed bool)
 
 func usageIntegrate(w io.Writer) {
@@ -73,27 +73,45 @@ func Run(out, errw io.Writer, args []string) int {
 		usageIntegrate(errw)
 		return fatal("error: on and off cannot be combined")
 	}
+	// Both directions report what actually changed. Only the wording is
+	// conditional: the work itself runs either way.
 	switch {
 	case remove:
+		was, err := integrationInstalled()
+		if err != nil {
+			return fatal("error: %v", err)
+		}
 		if err := removeIntegration(); err != nil {
 			return fatal("error: %v", err)
 		}
-		_, _ = fmt.Fprintln(out, integrationRemovedMessage)
+		if was {
+			_, _ = fmt.Fprintln(out, integrationRemovedMessage)
+		} else {
+			_, _ = fmt.Fprintln(out, integrationAbsentMessage)
+		}
 	case add:
+		was, err := integrationInstalled()
+		if err != nil {
+			return fatal("error: %v", err)
+		}
 		if err := installIntegration(); err != nil {
 			return fatal("error: %v", err)
 		}
-		_, _ = fmt.Fprintln(out, integrationInstalledMessage)
+		if was {
+			_, _ = fmt.Fprintln(out, integrationReinstalledMessage)
+		} else {
+			_, _ = fmt.Fprintln(out, integrationInstalledMessage)
+		}
 	default:
 		installed, err := integrationInstalled()
 		if err != nil {
 			return fatal("error: %v", err)
 		}
-		state := "off"
 		if installed {
-			state = "on"
+			_, _ = fmt.Fprintln(out, integrationPresentMessage)
+		} else {
+			_, _ = fmt.Fprintln(out, integrationAbsentMessage)
 		}
-		_, _ = fmt.Fprintf(out, "integrate: %s\n", state)
 	}
 	return 0
 }

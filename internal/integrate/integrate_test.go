@@ -46,8 +46,8 @@ func TestIntegrateRunReportsStatus(t *testing.T) {
 		t.Fatalf("a bare integrate should return 0, got %d (err=%q)", code, errw.String())
 	}
 	got := strings.TrimSpace(out.String())
-	if got != "integrate: on" && got != "integrate: off" {
-		t.Errorf("status should report on or off, got %q", got)
+	if got != integrationPresentMessage && got != integrationAbsentMessage {
+		t.Errorf("status should report one of the two states, got %q", got)
 	}
 	if errw.String() != "" {
 		t.Errorf("nothing should be written to the error stream: %q", errw.String())

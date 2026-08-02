@@ -48,6 +48,7 @@ func newTestCLI(t *testing.T, stdin string) *testCLI {
 	checker := updates.New(githubRepo, "prem-down", "1.0.0")
 	checker.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	checker.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	checker.Announce = func(updates.Upgrade) bool { return false } // never raise the notice dialog in a test
 	return &testCLI{
 		cli: &cli{out: out, err: errBuf, in: strings.NewReader(stdin), checker: checker},
 		out: out,
@@ -464,15 +465,22 @@ func TestRunDispatchesUpdates(t *testing.T) {
 	if code := c.run([]string{"updates"}); code != 0 {
 		t.Fatalf("updates should return 0, got code=%d", code)
 	}
-	if !strings.Contains(c.out.String(), "updates:") {
+	if !strings.Contains(c.out.String(), "Update checks are") {
 		t.Errorf("status not printed:\n%s", c.out)
 	}
 	c = newTestCLI(t, "")
 	if code := c.run([]string{"updates", "on"}); code != 0 {
 		t.Fatalf("updates on should return 0, got code=%d", code)
 	}
-	if !strings.Contains(c.out.String(), "updates: on") {
-		t.Errorf("setting not applied:\n%s", c.out)
+	saved, err := os.ReadFile(c.checker.ConfigPath) //nolint:gosec // G304: the path is this test's own t.TempDir file
+	if err != nil {
+		t.Fatalf("updates on did not write the settings file: %v", err)
+	}
+	if !strings.Contains(string(saved), `"updates": "on"`) {
+		t.Errorf("setting not applied, settings file reads:\n%s", saved)
+	}
+	if c.out.Len() == 0 {
+		t.Error("updates on printed nothing")
 	}
 }
 
@@ -653,11 +661,12 @@ func testChecker(t *testing.T) *updates.Checker {
 	u := updates.New(githubRepo, "prem-down", "1.0.0")
 	u.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	u.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	u.Announce = func(updates.Upgrade) bool { return false } // never raise the notice dialog in a test
 	return u
 }
 
 // The context-menu round trip.
-func TestDialogRunReportsSuccess(t *testing.T) {
+func TestDialogRunSaysNothingOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	src := writeProject(t, dir, "in.prproj")
 
@@ -665,8 +674,8 @@ func TestDialogRunReportsSuccess(t *testing.T) {
 	if failed {
 		t.Errorf("a good project should not report failure: %q", summary)
 	}
-	if !strings.Contains(summary, "wrote ") || !strings.Contains(summary, "_downgraded") {
-		t.Errorf("summary should name what was written, got %q", summary)
+	if summary != "" {
+		t.Errorf("a clean run should show nothing, got %q", summary)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "in_downgraded.prproj")); err != nil {
 		t.Errorf("the conversion should have happened in-process: %v", err)
@@ -823,8 +832,8 @@ func TestRunOffersAnUpgradeForAnUnrecognisedRelease(t *testing.T) {
 	if code := c.run([]string{src}); code != exitUnrecognisedRelease {
 		t.Fatalf("want code=%d, got code=%d err=%s", exitUnrecognisedRelease, code, c.err)
 	}
-	if !strings.Contains(c.out.String(), "wrote ") {
-		t.Errorf("want the file converted:\n%s", c.out)
+	if _, err := os.Stat(strings.TrimSuffix(src, ".prproj") + "_downgraded.prproj"); err != nil {
+		t.Errorf("want the file converted: %v (stdout: %q)", err, c.out)
 	}
 	for _, want := range []string{"unrecognised", "newer prem-down", "2.0.0"} {
 		if !strings.Contains(c.err.String(), want) {
@@ -848,8 +857,8 @@ func TestRunStillWarnsWhenNoUpgradeIsAvailable(t *testing.T) {
 	if code := c.run([]string{src}); code != exitUnrecognisedRelease {
 		t.Fatalf("want code=%d, got code=%d err=%s", exitUnrecognisedRelease, code, c.err)
 	}
-	if !strings.Contains(c.out.String(), "wrote ") {
-		t.Errorf("want the file converted:\n%s", c.out)
+	if _, err := os.Stat(strings.TrimSuffix(src, ".prproj") + "_downgraded.prproj"); err != nil {
+		t.Errorf("want the file converted: %v (stdout: %q)", err, c.out)
 	}
 	if !strings.Contains(c.err.String(), "unrecognised") {
 		t.Errorf("the warning must stand alone:\n%s", c.err)
@@ -909,6 +918,7 @@ func TestDialogRunDoesNotFlagAnUnrecognisedReleaseAsFailed(t *testing.T) {
 	checker := updates.New(githubRepo, "prem-down", "1.0.0")
 	checker.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	checker.Ask = func(string, io.Reader, io.Writer) bool { return false }
+	checker.Announce = func(updates.Upgrade) bool { return false } // never raise the notice dialog in a test
 	src := writeFutureProject(t, t.TempDir(), "in.prproj")
 
 	summary, failed := dialogRun(checker, []string{src})
