@@ -1,3 +1,3 @@
 module github.com/lucuma13/prem-down
 
-go 1.26.5
+go 1.26.7
