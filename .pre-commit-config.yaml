@@ -92,7 +92,7 @@ repos:
     hooks:
       - id: shellcheck
         exclude_types: [bats]
-  # Swift formatter
+  # Swift formatter and linter
   - repo: local
     hooks:
       - id: swift-format
