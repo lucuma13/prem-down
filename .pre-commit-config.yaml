@@ -26,7 +26,7 @@ repos:
       - id: check-shebang-scripts-are-executable
   # Spellcheck
   - repo: https://github.com/crate-ci/typos
-    rev: v1.48.0
+    rev: v1.50.2
     hooks:
       - id: typos
         args: [--force-exclude] # Flag only: removed default --write-changes
@@ -46,18 +46,18 @@ repos:
           - "{extends: default, rules: {line-length: {max: 120, level: warning}, comments: {min-spaces-from-content: 1}}}"
   # GitHub workflow schema validation
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.37.4
+    rev: 0.38.0
     hooks:
       - id: check-github-workflows
         args: ["--verbose"]
   # CI security auditing
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.27.0
+    rev: v1.30.1
     hooks:
       - id: zizmor
   # Go formatter and linter
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.12.2
+    rev: v2.13.2
     hooks:
       - id: golangci-lint-fmt
         args:
