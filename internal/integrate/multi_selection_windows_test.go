@@ -214,8 +214,22 @@ func TestLongPathNameExpandsShortPath(t *testing.T) {
 		t.Skip("no short names on this volume")
 	}
 
-	if got := longPathName(short); !strings.EqualFold(got, long) {
-		t.Errorf("longPathName(%q) = %q, want %q", short, got, long)
+	// Compared by identity, not by string: the temp dir may itself sit under a
+	// short-named component (CI's C:\Users\RUNNER~1), which is expanded too.
+	got := longPathName(short)
+	if strings.Contains(got, "~") {
+		t.Errorf("longPathName(%q) = %q, still has short components", short, got)
+	}
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	longInfo, err := os.Stat(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, longInfo) {
+		t.Errorf("longPathName(%q) = %q, not the same file as %q", short, got, long)
 	}
 }
 
