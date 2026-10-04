@@ -543,3 +543,6 @@ func refreshServicesMenu() {
 // server activation to intercept (that mechanism is Windows-only; see
 // integrate_windows.go).
 func MaybeRunCOMServer([]string, Downgrader) bool { return false }
+
+// NotifyCreated is a no-op on macOS.
+func NotifyCreated(string, bool) {}

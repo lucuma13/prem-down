@@ -28,9 +28,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Downgrader converts project files and Productions.
@@ -100,39 +103,74 @@ func getProjectVersion(xml string) (int, error) {
 	return v, nil
 }
 
-// uniqueName returns stem+ext if that path is free, else the same name with a
-// -1/-2/-3... suffix inserted before the extension. Only a successful Stat
-// counts as taken: any Stat error (not just not-exist) treats the path as free,
-// so an unreadable directory surfaces as a write error later instead of looping
-// here forever. This check is advisory - the O_EXCL open in writeNew (and the
-// exclusive os.Mkdir for a Production's output folder) is what actually
-// guarantees nothing existing is overwritten if something claims the name in
-// between.
-func uniqueName(stem, ext string) string {
+// DowngradedSuffix marks a converted copy: "<name>_downgraded.prproj" for a
+// project, "<name>_downgraded" for a Production folder.
+const DowngradedSuffix = "_downgraded"
+
+// maxNameLen is the longest single file or folder name the filesystem accepts.
+const maxNameLen = 255
+
+// nameLen measures a name in the unit the local filesystem limits it by.
+func nameLen(name string) int {
+	if runtime.GOOS == "windows" {
+		return len(utf16.Encode([]rune(name)))
+	}
+	return len(name)
+}
+
+// fitBase shortens base, a whole character at a time from the end, until
+// base+tail fits in maxNameLen. tail is everything the output name appends to
+// the source's (suffix, counter, extension).
+func fitBase(base, tail string) string {
+	for base != "" && nameLen(base+tail) > maxNameLen {
+		_, size := utf8.DecodeLastRuneInString(base)
+		base = base[:len(base)-size]
+	}
+	return base
+}
+
+// uniqueName returns dir/base+suffix+ext if that path is free, else the same
+// name with a -1/-2/-3... counter inserted before ext. base is shortened to fit
+// the name limit (see fitBase); reserve is extra room to leave, for a name that
+// something else is later derived from.
+//
+// Only a successful Stat counts as taken: any Stat error (not just not-exist)
+// treats the path as free, so an unreadable directory surfaces as a write error
+// later instead of looping here forever. This check is advisory - the O_EXCL
+// open in writeNew (and the exclusive os.Mkdir for a Production's output
+// folder) is what actually guarantees nothing existing is overwritten if
+// something claims the name in between.
+func uniqueName(dir, base, suffix, ext, reserve string) string {
+	candidate := func(counter string) string {
+		tail := suffix + counter + ext
+		return filepath.Join(dir, fitBase(base, tail+reserve)+tail)
+	}
 	taken := func(p string) bool {
 		_, err := os.Stat(p) //nolint:gosec // G703: p derives from a user-supplied CLI path; stat-ing it is the tool's purpose
 		return err == nil
 	}
-	if !taken(stem + ext) {
-		return stem + ext
+	if p := candidate(""); !taken(p) {
+		return p
 	}
 	for n := 1; ; n++ {
-		candidate := fmt.Sprintf("%s-%d%s", stem, n, ext)
-		if !taken(candidate) {
-			return candidate
+		if p := candidate(fmt.Sprintf("-%d", n)); !taken(p) {
+			return p
 		}
 	}
 }
 
-// UniquePath is uniqueName for a file path.
-func UniquePath(path string) string {
-	ext := filepath.Ext(path)
-	return uniqueName(strings.TrimSuffix(path, ext), ext)
+// OutputPath returns a free path beside the project src for its downgraded
+// copy.
+func OutputPath(src string) string {
+	base := filepath.Base(src)
+	return uniqueName(filepath.Dir(src), strings.TrimSuffix(base, filepath.Ext(base)), DowngradedSuffix, PrprojExt, "")
 }
 
-// UniqueDir is uniqueName for a directory path.
-func UniqueDir(path string) string {
-	return uniqueName(path, "")
+// OutputDir returns a free path beside the Production folder src for its
+// downgraded copy. Room is left for ProdsetExt, since the settings file inside
+// is renamed to match the folder.
+func OutputDir(src string) string {
+	return uniqueName(filepath.Dir(src), filepath.Base(src), DowngradedSuffix, "", ProdsetExt)
 }
 
 // readMaybeGzip reads a project file, transparently decompressing it when it

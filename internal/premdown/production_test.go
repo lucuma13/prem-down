@@ -467,7 +467,7 @@ func TestDowngradeProductionRenamesProdsetToFolder(t *testing.T) {
 	if err := os.Mkdir(src+"_downgraded", 0o755); err == nil { //nolint:gosec // test setup
 		_ = err
 	}
-	dst2 := UniqueDir(src + "_downgraded")
+	dst2 := OutputDir(src)
 	if err := silent().DowngradeProduction(src, dst2, 43, false); err != nil {
 		t.Fatal(err)
 	}
@@ -771,16 +771,24 @@ func TestDowngradeProductionPreservesSymlinks(t *testing.T) {
 	}
 }
 
-// UniqueDir must not split a directory name on ".", or a Production folder with
+// OutputDir must not split a directory name on ".", or a Production folder with
 // a dot in its name would get the suffix wedged into the middle.
-func TestUniqueDirDoesNotSplitOnDots(t *testing.T) {
-	dir := t.TempDir()
-	taken := filepath.Join(dir, "my.big.production")
-	if err := os.Mkdir(taken, 0o750); err != nil {
-		t.Fatal(err)
+func TestOutputDirDoesNotSplitOnDots(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "my.big.production")
+	if got, want := OutputDir(src), src+DowngradedSuffix; got != want {
+		t.Errorf("OutputDir = %q, want %q", got, want)
 	}
-	if got, want := UniqueDir(taken), taken+"-1"; got != want {
-		t.Errorf("UniqueDir = %q, want %q", got, want)
+}
+
+// A Production folder name leaves room for the .prodset renamed after it.
+func TestOutputDirLeavesRoomForProdset(t *testing.T) {
+	src := filepath.Join(t.TempDir(), strings.Repeat("p", 250))
+	name := filepath.Base(OutputDir(src))
+	if !strings.HasSuffix(name, DowngradedSuffix) {
+		t.Errorf("suffix lost: %q", name)
+	}
+	if n := nameLen(name + ProdsetExt); n != maxNameLen {
+		t.Errorf("settings file name length = %d, want %d", n, maxNameLen)
 	}
 }
 

@@ -98,6 +98,10 @@ type cli struct {
 
 	// checker is the opt-in update check
 	checker *updates.Checker
+
+	// created is told about each output once it is written, so the file manager
+	// can show it. Nil does nothing.
+	created func(path string, dir bool)
 }
 
 // newCLI wires a cli to the real process streams; used by main.
@@ -107,6 +111,7 @@ func newCLI() *cli {
 		err:     os.Stderr,
 		in:      os.Stdin,
 		checker: updates.New(githubRepo, "prem-down", version),
+		created: integrate.NotifyCreated,
 	}
 }
 
@@ -115,6 +120,13 @@ func newCLI() *cli {
 // process streams in main, in-memory buffers under test.
 func (c *cli) downgrader() *premdown.Downgrader {
 	return &premdown.Downgrader{Out: c.out, Err: c.err}
+}
+
+// notifyCreated passes a written output to the created hook, if any.
+func (c *cli) notifyCreated(path string, dir bool) {
+	if c.created != nil {
+		c.created(path, dir)
+	}
 }
 
 // fatal reports a user error and returns the process exit code (1) for the
@@ -169,6 +181,7 @@ func dialogRun(checker *updates.Checker, files []string) (string, bool) {
 		in:      strings.NewReader(""),
 		gui:     true,
 		checker: checker,
+		created: integrate.NotifyCreated,
 	}
 	code := c.run(files)
 	// A clean run says nothing: the converted file sitting next to the original
@@ -290,16 +303,17 @@ func (c *cli) run(args []string) int {
 	for _, j := range jobs {
 		d := c.downgrader()
 		if j.production {
-			dst := premdown.UniqueDir(j.path + "_downgraded")
+			dst := premdown.OutputDir(j.path)
 			if err := d.DowngradeProduction(j.path, dst, targetVersion, verbose); err != nil {
 				_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 				failed = true
+			} else {
+				c.notifyCreated(dst, true)
 			}
 			unrecognised = unrecognised || d.SawUnrecognisedRelease()
 			continue
 		}
-		ext := filepath.Ext(j.path)
-		dst := premdown.UniquePath(strings.TrimSuffix(j.path, ext) + "_downgraded" + premdown.PrprojExt)
+		dst := premdown.OutputPath(j.path)
 		err := d.Downgrade(j.path, dst, targetVersion, verbose)
 		unrecognised = unrecognised || d.SawUnrecognisedRelease()
 		if err != nil {
@@ -307,6 +321,7 @@ func (c *cli) run(args []string) int {
 			failed = true
 			continue
 		}
+		c.notifyCreated(dst, false)
 		// A terminal run is silent unless asked: the converted file next to the
 		// original is the result, so a clean run has nothing to add, and no output
 		// means nothing went wrong.

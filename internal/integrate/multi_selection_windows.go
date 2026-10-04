@@ -406,9 +406,33 @@ func extractHDROPFiles(pDataObj unsafe.Pointer) []string {
 		}
 		buf := make([]uint16, int(length)+1)
 		call(procDragQueryFileW, hDrop, uintptr(i), ptr(&buf[0]), uintptr(len(buf)))
-		files = append(files, syscall.UTF16ToString(buf))
+		files = append(files, longPathName(syscall.UTF16ToString(buf)))
 	}
 	return files
+}
+
+// longPathName expands an 8.3 short path back to its full form. Explorer hands
+// the verb the short path when the real one exceeds MAX_PATH, and the output
+// name derives from the input, so without this "...\project.prproj" would be
+// downgraded to "...\PROJEC~1_downgraded.prproj". On any failure the path is
+// returned unchanged, which is no worse than before.
+func longPathName(path string) string {
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return path
+	}
+	n := uint32(len(path) + 1) //nolint:gosec // G115: a path is far below 4G
+	for {
+		buf := make([]uint16, n)
+		got, err := syscall.GetLongPathName(p, &buf[0], n)
+		if err != nil || got == 0 {
+			return path
+		}
+		if got < n {
+			return syscall.UTF16ToString(buf[:got])
+		}
+		n = got // buffer too small: got is the size needed, NUL included
+	}
 }
 
 // messagePump runs the STA message loop. In a single-threaded apartment, COM

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // silent is a Downgrader that discards all output, for exercising Downgrade and
@@ -330,31 +331,68 @@ func TestGetProjectVersionErrors(t *testing.T) {
 	}
 }
 
-func TestUniquePath(t *testing.T) {
+func TestOutputPath(t *testing.T) {
 	dir := t.TempDir()
-	base := filepath.Join(dir, "out.prproj")
+	src := filepath.Join(dir, "out.prproj")
+	base := filepath.Join(dir, "out_downgraded.prproj")
 
 	// A free path is returned unchanged.
-	if got := UniquePath(base); got != base {
-		t.Errorf("UniquePath(free) = %q, want %q", got, base)
+	if got := OutputPath(src); got != base {
+		t.Errorf("OutputPath(free) = %q, want %q", got, base)
 	}
 
 	// Once taken, a -1 suffix is added before the extension.
 	if err := os.WriteFile(base, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file
 		t.Fatal(err)
 	}
-	want1 := filepath.Join(dir, "out-1.prproj")
-	if got := UniquePath(base); got != want1 {
-		t.Errorf("UniquePath(taken) = %q, want %q", got, want1)
+	want1 := filepath.Join(dir, "out_downgraded-1.prproj")
+	if got := OutputPath(src); got != want1 {
+		t.Errorf("OutputPath(taken) = %q, want %q", got, want1)
 	}
 
 	// With -1 also taken, it climbs to -2.
 	if err := os.WriteFile(want1, nil, 0o644); err != nil { //nolint:gosec // G306: test fixture file
 		t.Fatal(err)
 	}
-	want2 := filepath.Join(dir, "out-2.prproj")
-	if got := UniquePath(base); got != want2 {
-		t.Errorf("UniquePath(taken twice) = %q, want %q", got, want2)
+	want2 := filepath.Join(dir, "out_downgraded-2.prproj")
+	if got := OutputPath(src); got != want2 {
+		t.Errorf("OutputPath(taken twice) = %q, want %q", got, want2)
+	}
+}
+
+// A source name near the limit loses the end of its own part, never the suffix,
+// counter or extension, so the output can still be created.
+func TestOutputPathFitsNameLimit(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, strings.Repeat("n", 248)+PrprojExt)
+
+	got := OutputPath(src)
+	name := filepath.Base(got)
+	if !strings.HasSuffix(name, DowngradedSuffix+PrprojExt) {
+		t.Errorf("suffix lost: %q", name)
+	}
+	if nameLen(name) != maxNameLen {
+		t.Errorf("name length = %d, want %d", nameLen(name), maxNameLen)
+	}
+	if err := os.WriteFile(got, nil, 0o600); err != nil {
+		t.Fatalf("output name not creatable: %v", err)
+	}
+
+	// The counter also fits.
+	if name := filepath.Base(OutputPath(src)); !strings.HasSuffix(name, DowngradedSuffix+"-1"+PrprojExt) || nameLen(name) > maxNameLen {
+		t.Errorf("counter name = %q (%d)", name, nameLen(name))
+	}
+}
+
+// Shortening cuts whole characters, never splitting a multi-byte one.
+func TestFitBaseKeepsWholeCharacters(t *testing.T) {
+	base := strings.Repeat("é", 200)
+	got := fitBase(base, DowngradedSuffix+PrprojExt)
+	if !utf8.ValidString(got) {
+		t.Fatalf("split a character: %q", got)
+	}
+	if n := nameLen(got + DowngradedSuffix + PrprojExt); n > maxNameLen {
+		t.Errorf("length = %d, over %d", n, maxNameLen)
 	}
 }
 

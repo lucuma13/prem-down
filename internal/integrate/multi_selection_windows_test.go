@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -181,4 +183,45 @@ func restoreServerState(t *testing.T) {
 	t.Cleanup(func() {
 		downgrade, showResult, workDone, workStarted, serverThreadID = oldDowngrade, oldShow, oldDone, oldStarted, oldThread
 	})
+}
+
+// Explorer hands a verb the 8.3 short path once the real one exceeds MAX_PATH;
+// it must be expanded so the output is named after the real file.
+func TestLongPathNameExpandsShortPath(t *testing.T) {
+	dir := t.TempDir()
+	for len(dir) < 300 {
+		dir = filepath.Join(dir, strings.Repeat("d", 60))
+	}
+	long := filepath.Join(dir, "project.prproj")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(long, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := syscall.UTF16PtrFromString(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]uint16, len(long)+1)
+	n, err := syscall.GetShortPathName(p, &buf[0], uint32(len(buf))) //nolint:gosec // G115: a path is far below 4G
+	if err != nil || n == 0 {
+		t.Skipf("no short names on this volume: %v", err)
+	}
+	short := syscall.UTF16ToString(buf[:n])
+	if short == long {
+		t.Skip("no short names on this volume")
+	}
+
+	if got := longPathName(short); !strings.EqualFold(got, long) {
+		t.Errorf("longPathName(%q) = %q, want %q", short, got, long)
+	}
+}
+
+func TestLongPathNameLeavesUnresolvablePathAlone(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "NOFILE~1.PRP")
+	if got := longPathName(missing); got != missing {
+		t.Errorf("longPathName(%q) = %q, want it unchanged", missing, got)
+	}
 }

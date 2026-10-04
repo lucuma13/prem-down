@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -408,6 +409,36 @@ func TestRunDowngradesProductionFromProdsetArgument(t *testing.T) {
 	}
 }
 
+// Each output is reported to the created hook once written.
+func TestRunReportsEachCreatedOutput(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.prproj")
+	writeFile(t, good, `<PremiereData Version="3">
+<Project ObjectID="1" ClassID="y" Version="42">
+</Project>
+</PremiereData>`)
+	bad := filepath.Join(dir, "bad.prproj")
+	writeFile(t, bad, `<PremiereData Version="3"></PremiereData>`)
+	prod := newProduction(t, "Notify")
+
+	type created struct {
+		path string
+		dir  bool
+	}
+	var got []created
+	c := newTestCLI(t, "")
+	c.created = func(path string, dir bool) { got = append(got, created{path, dir}) }
+	c.run([]string{"--to=2023", bad, good, prod})
+
+	want := []created{
+		{prod + "_downgraded", true},
+		{filepath.Join(dir, "good_downgraded.prproj"), false},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("created = %v, want %v", got, want)
+	}
+}
+
 // A folder that holds no settings file is not a Production; run reports it and
 // exits non-zero rather than inventing one.
 func TestRunRejectsNonProductionFolder(t *testing.T) {
@@ -526,6 +557,9 @@ func TestNewCLIWiresTheProcessStreams(t *testing.T) {
 	}
 	if c.gui {
 		t.Error("a plain invocation is not a file-manager run")
+	}
+	if c.created == nil {
+		t.Error("newCLI should wire the file-manager notification")
 	}
 	if c.checker == nil {
 		t.Fatal("newCLI should wire the update checker")
