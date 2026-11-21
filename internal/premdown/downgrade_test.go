@@ -819,12 +819,13 @@ func TestPre2026PassThrough(t *testing.T) {
 	}
 }
 
-// TestDowngrade2026Fixture round-trips the real 2026 fixture (v45 -> v43) and
+// sparseFixtureToDense takes one of the real sparse fixtures to 2025 (v43) and
 // asserts the invariant 2025 requires: every VideoComponentParam definition
 // ends up with both LowerBound and UpperBound present. Also checks the Lumetri
 // color-class override and that the version is re-gated.
-func TestDowngrade2026Fixture(t *testing.T) {
-	fixture := filepath.Join("testdata", "fixture_ppro26.prproj")
+func sparseFixtureToDense(t *testing.T, name string) {
+	t.Helper()
+	fixture := filepath.Join("testdata", name)
 	if _, err := os.Stat(fixture); err != nil {
 		t.Skipf("fixture %s not present", fixture)
 	}
@@ -860,6 +861,43 @@ func TestDowngrade2026Fixture(t *testing.T) {
 	}
 	if colorOverrides == 0 {
 		t.Error("expected at least one Lumetri color-class param in the fixture")
+	}
+}
+
+// TestDowngrade2026Fixture round-trips the real 2026 fixture (v45 -> v43).
+func TestDowngrade2026Fixture(t *testing.T) {
+	sparseFixtureToDense(t, "fixture_ppro26.prproj")
+}
+
+// TestDowngrade2027Fixture round-trips the real 2027 fixture (v46 -> v43).
+func TestDowngrade2027Fixture(t *testing.T) {
+	sparseFixtureToDense(t, "fixture_ppro27.prproj")
+}
+
+// TestDowngrade2027FixtureTo2026 is the sparse-to-sparse row on real data. The
+// 2027 fixture (v46) auto-targets 2026 (v45) with nothing on Err - 2027 is a
+// release the map knows - and the <Project> version is the entire change: no
+// conversion step exists between two sparse releases.
+func TestDowngrade2027FixtureTo2026(t *testing.T) {
+	fixture := filepath.Join("testdata", "fixture_ppro27.prproj")
+	if _, err := os.Stat(fixture); err != nil {
+		t.Skipf("fixture %s not present", fixture)
+	}
+	out := filepath.Join(t.TempDir(), "out.prproj")
+	var errBuf bytes.Buffer
+	d := &Downgrader{Err: &errBuf}
+	if err := d.Downgrade(fixture, out, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if d.SawUnrecognisedRelease() || errBuf.Len() > 0 {
+		t.Errorf("2027 must convert quietly, got flag=%v err=%q",
+			d.SawUnrecognisedRelease(), errBuf.String())
+	}
+
+	inXML := string(gunzipFile(t, fixture))
+	outXML := string(gunzipFile(t, out))
+	if outXML != mustSetProjectVersion(t, inXML, 45) {
+		t.Fatal("v46 -> v45 output is not input-with-regated-version")
 	}
 }
 
@@ -973,8 +1011,8 @@ func TestNeedsFieldReinsertion(t *testing.T) {
 	}{
 		{"2026 -> 2025: sparse source, dense target", 45, dense, true},
 		{"2026 -> 2022: sparse source, older dense target", 45, 40, true},
-		{"2027 -> 2026: both sparse, nothing to insert", 47, 45, false},
-		{"2027 -> 2025: sparse source jumping the boundary", 47, dense, true},
+		{"2027 -> 2026: both sparse, nothing to insert", 46, 45, false},
+		{"2027 -> 2025: sparse source jumping the boundary", 46, dense, true},
 		{"2024 -> 2023: both dense, already complete", 42, 41, false},
 		{"2025 -> 2024: source is the boundary itself", dense, 42, false},
 	}

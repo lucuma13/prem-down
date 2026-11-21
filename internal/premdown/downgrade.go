@@ -2,8 +2,9 @@
 // older release of Premiere can open them.
 //
 // A downgrade is two things: stamping the target release into the document, and
-// - for 2026 sources - re-inserting the fields 2026's sparser serialisation
-// drops but older releases require present (see reconstruct.go).
+// - when a 2026 or later source is taken to 2025 or earlier - re-inserting the
+// fields the sparser serialisation drops but older releases require present
+// (see reconstruct.go).
 //
 // The second half is what the well-known trick (gunzip the .prproj, lower the
 // top-level project version, re-gzip) misses, and why it stopped working with

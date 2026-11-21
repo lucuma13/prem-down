@@ -80,6 +80,11 @@ type prodsetVersions struct {
 // mPreviousProductionPaths key and the fields 2026 omits from the embedded
 // mIngestSettingsStr and mProjectSettingsStr documents both survive the trip
 // untouched.
+//
+// 2027 keeps 2026's form: UTF-8, the same keys, both versions raised to 46. It
+// needs nothing but those two lowered: 26.5 then opens the Production with
+// every setting kept, including the folder 2027's upgrade recorded in
+// mPreviousProductionPaths.
 func decodeProdset(raw []byte) (string, error) {
 	switch {
 	case len(raw) >= 2 && raw[0] == 0xff && raw[1] == 0xfe:

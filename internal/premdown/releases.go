@@ -52,6 +52,7 @@ var releases = []struct {
 	{42, "2024", nil},
 	{43, "2025", nil},
 	{45, "2026", nil},
+	{46, "2027", nil},
 }
 
 // newestKnownProjectVersion is the last entry's: releases is stored

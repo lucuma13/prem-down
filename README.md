@@ -6,7 +6,7 @@
 
 `prem-down` downgrades an Adobe Premiere Pro project file so an older version of Premiere can open it. It runs completely **offline and local** to your machine – no data is ever uploaded to the internet.
 
-It fully supports the breaking changes introduced with **Premiere Pro 2026**. The well-known method (gunzip the .prproj, lower the top-level project version, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation – it drops fields that older releases expect present (and report the project as damaged if they are absent). So the fix is bifold: re-insert those required fields, and set the project version to the target release.
+It fully supports the breaking changes introduced with **Premiere Pro 2026 and 2027**. The well-known method (gunzip the .prproj, lower the top-level project version, re-gzip) no longer works reliably on Premiere 2026 files. The cause is that 2026 uses sparser serialisation – it drops fields that older releases expect present (and report the project as damaged if they are absent). So the fix is bifold: re-insert those required fields, and set the project version to the target release.
 
 **Premiere Pro Productions** are supported too. A Production is a folder rather than a single file, so `prem-down` copies the whole thing to a sibling `<name>_downgraded` folder – downgrading the settings file and every project inside.
 
@@ -66,6 +66,6 @@ prem-down updates off         # deactivate check for updates
 
 ### 🧪 Feedback & Contributing
 
-While backwards-compatibility between Premiere Pro 2026 and 2025 has been throrougly tested, you must verify your downgraded project manually. Features, effects or tools native to newer Premiere releases will not render or translate when opened in an older version.
+While backwards-compatibility between Premiere Pro 2027, 2026 and 2025 has been throrougly tested, you must verify your downgraded project manually. Features, effects or tools native to newer Premiere releases will not render or translate when opened in an older version.
 
 If a downgraded project fails to load or exhibits unexpected behavior, please submit a detailed issue on the GitHub repository with the source and target version numbers.

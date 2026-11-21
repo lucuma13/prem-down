@@ -12,7 +12,7 @@ import (
 func TestReleaseNamesNewestFirst(t *testing.T) {
 	got := releaseNames()
 	names := strings.Split(got, ", ")
-	if names[0] != "2026" {
+	if names[0] != "2027" {
 		t.Errorf("releaseNames should list newest first, got first = %q", names[0])
 	}
 	if names[len(names)-1] != "CS4" {
@@ -25,23 +25,24 @@ func TestReleaseNamesNewestFirst(t *testing.T) {
 
 func TestReleaseExamples(t *testing.T) {
 	got := ReleaseExamples()
-	// The two releases just below the newest (2026), single-quoted, "..."-trailed.
+	// The two releases just below the newest (2027), single-quoted, "..."-trailed.
 	if !strings.HasSuffix(got, "...") {
 		t.Errorf("ReleaseExamples should end with ..., got %q", got)
 	}
-	for _, want := range []string{"'2025'", "'2024'"} {
+	for _, want := range []string{"'2026'", "'2025'"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ReleaseExamples = %q, missing %s", got, want)
 		}
 	}
 	// The newest release itself is skipped (examples are for downgrade targets).
-	if strings.Contains(got, "'2026'") {
+	if strings.Contains(got, "'2027'") {
 		t.Errorf("ReleaseExamples should skip the newest release, got %q", got)
 	}
 }
 
 func TestResolveRelease(t *testing.T) {
 	cases := map[string]int{
+		"2027":    46,
 		"2026":    45,
 		"2025":    43,
 		"CS4":     22,
@@ -74,6 +75,7 @@ func TestPreviousRelease(t *testing.T) {
 		wantName string
 		wantOK   bool
 	}{
+		{46, 45, "2026", true},   // 2027 -> 2026
 		{45, 43, "2025", true},   // 2026 -> 2025 (skips the absent v44)
 		{32, 30, "2015.1", true}, // 2017 -> 2015.1 (skips the absent v31)
 		{23, 22, "CS4", true},    // one step down lands on the oldest

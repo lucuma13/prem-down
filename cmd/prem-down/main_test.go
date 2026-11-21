@@ -536,7 +536,7 @@ func TestRunUpdatesWithoutAChecker(t *testing.T) {
 func TestRunRejectsAnUnknownRelease(t *testing.T) {
 	src := writeProject(t, t.TempDir(), "in.prproj")
 	c := newTestCLI(t, "")
-	if code := c.run([]string{"--to=2027", src}); code != 1 {
+	if code := c.run([]string{"--to=2028", src}); code != 1 {
 		t.Fatalf("an unknown release should fatal 1, got code=%d", code)
 	}
 	if !strings.Contains(c.err.String(), "unknown release") {
@@ -788,15 +788,16 @@ func projectVersionOf(t *testing.T, path string) int {
 	return v
 }
 
-// Two projects at different releases, downgraded in one invocation, must each
-// land one release below their own source.
+// Projects at different releases, downgraded in one invocation, must each land
+// one release below their own source.
 func TestRunAutoTargetsEachProjectIndependently(t *testing.T) {
 	dir := t.TempDir()
 	src25 := sharedFixture(t, dir, "fixture_ppro25.prproj", "a2025.prproj")
 	src26 := sharedFixture(t, dir, "fixture_ppro26.prproj", "b2026.prproj")
+	src27 := sharedFixture(t, dir, "fixture_ppro27.prproj", "c2027.prproj")
 
 	c := newTestCLI(t, "")
-	if code := c.run([]string{src25, src26}); code != 0 {
+	if code := c.run([]string{src25, src26, src27}); code != 0 {
 		t.Fatalf("mixed batch should succeed, got code=%d:\n%s", code, c.err)
 	}
 	for _, tc := range []struct {
@@ -805,6 +806,7 @@ func TestRunAutoTargetsEachProjectIndependently(t *testing.T) {
 	}{
 		{"a2025_downgraded.prproj", 42},
 		{"b2026_downgraded.prproj", 43},
+		{"c2027_downgraded.prproj", 45},
 	} {
 		if got := projectVersionOf(t, filepath.Join(dir, tc.out)); got != tc.want {
 			t.Errorf("%s: got Project version %d, want %d", tc.out, got, tc.want)
