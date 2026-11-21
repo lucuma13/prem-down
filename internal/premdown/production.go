@@ -16,6 +16,7 @@
 package premdown
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -223,6 +224,9 @@ func (d *Downgrader) downgradeProdset(src, dst string, projectVersion int, verbo
 	if err := verifyProdset(out, projectVersion); err != nil {
 		return err
 	}
+	if err := d.ctx().Err(); err != nil {
+		return err
+	}
 	return writeNew(dst, out, 0o644)
 }
 
@@ -270,7 +274,10 @@ func findProdset(dir string) (string, error) {
 // copyFile reproduces one file verbatim at dst. Used for everything in a
 // Production that is not a project file - media, previews, autosaves, caches -
 // so links stored relative to the Production folder still resolve in the copy.
-func copyFile(src, dst string, perm os.FileMode) error {
+//
+// A media file can run to gigabytes, so the copy also stops once ctx is
+// cancelled, and fillNew removes what it had written.
+func copyFile(ctx context.Context, src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src) //nolint:gosec // G304: src is inside the user-supplied Production folder; copying it is the tool's purpose
 	if err != nil {
 		return err
@@ -283,9 +290,22 @@ func copyFile(src, dst string, perm os.FileMode) error {
 		return err
 	}
 	return fillNew(out, dst, func(w io.Writer) error {
-		_, err := io.Copy(w, in)
+		_, err := io.Copy(w, ctxReader{ctx, in})
 		return err
 	})
+}
+
+// ctxReader fails every Read once ctx is cancelled.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // productionTarget resolves the one version every file in the Production will
@@ -333,11 +353,17 @@ func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion i
 
 	var projects, copied, failed int
 	fail := func(rel string, err error) {
+		if errors.Is(err, context.Canceled) {
+			return // not this file's fault; reported once, for the whole folder
+		}
 		_, _ = fmt.Fprintf(d.errw(), "error: %s: %v\n", rel, err)
 		failed++
 	}
 
 	walkErr := filepath.WalkDir(srcDir, func(path string, entry fs.DirEntry, err error) error {
+		if ctxErr := d.ctx().Err(); ctxErr != nil {
+			return ctxErr
+		}
 		rel, relErr := filepath.Rel(srcDir, path)
 		if relErr != nil {
 			return relErr
@@ -415,7 +441,7 @@ func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion i
 			if errors.As(err, &notOlder) {
 				// Already at or below the Production's target, so there is nothing
 				// to downgrade; copy it through so the Production stays complete.
-				if err := copyFile(path, dst, perm); err != nil {
+				if err := copyFile(d.ctx(), path, dst, perm); err != nil {
 					fail(rel, err)
 					return nil
 				}
@@ -432,7 +458,7 @@ func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion i
 			}
 			projects++
 		default:
-			if err := copyFile(path, dst, perm); err != nil {
+			if err := copyFile(d.ctx(), path, dst, perm); err != nil {
 				fail(rel, err)
 				return nil
 			}
@@ -445,6 +471,11 @@ func (d *Downgrader) DowngradeProduction(srcDir, dstDir string, projectVersion i
 		}
 		return nil
 	})
+	// Ahead of walkErr: the walk may have stopped on the cancellation itself, or
+	// only seen it as a copy that failed, and either way this is the report.
+	if err := d.ctx().Err(); err != nil {
+		return fmt.Errorf("%s is incomplete: %w", dstDir, err)
+	}
 	if walkErr != nil {
 		return walkErr
 	}

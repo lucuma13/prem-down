@@ -3,6 +3,7 @@ package premdown
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -1050,5 +1051,23 @@ func TestSparseSourceJumpingTheBoundaryStillReinserts(t *testing.T) {
 		if !strings.Contains(got, "<"+field+">") {
 			t.Errorf("%s must be re-inserted for a dense target:\n%s", field, got)
 		}
+	}
+}
+
+// An interrupt during the conversion must not still create the output.
+func TestDowngradeWritesNothingWhenCancelled(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.prproj")
+	if err := os.WriteFile(src, []byte(prodProject), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dst := filepath.Join(dir, "out.prproj")
+	if err := (&Downgrader{Ctx: ctx}).Downgrade(src, dst, 43, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Downgrade = %v, want context.Canceled", err)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("a cancelled downgrade wrote its output")
 	}
 }

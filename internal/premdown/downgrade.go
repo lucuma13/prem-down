@@ -23,6 +23,7 @@ package premdown
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -46,9 +47,14 @@ import (
 //
 // A nil writer discards, so the zero Downgrader is usable and silent, which is
 // what tests asserting on written files rather than printed output want.
+//
+// Ctx, once cancelled, stops the work before anything further is written: a
+// copy in progress is abandoned and its partial file removed, and a Production
+// walk ends early. A nil Ctx never cancels.
 type Downgrader struct {
 	Out io.Writer
 	Err io.Writer
+	Ctx context.Context
 
 	// unrecognised records that a source carried a <Project> version above the
 	// newest release in the version map, and doubles as the warn-once latch.
@@ -68,6 +74,13 @@ func (d *Downgrader) errw() io.Writer {
 		return io.Discard
 	}
 	return d.Err
+}
+
+func (d *Downgrader) ctx() context.Context {
+	if d.Ctx == nil {
+		return context.Background()
+	}
+	return d.Ctx
 }
 
 // SawUnrecognisedRelease reports whether anything this Downgrader converted
@@ -428,6 +441,11 @@ func (d *Downgrader) Downgrade(src, dst string, projectVersion int, verbose bool
 		return err
 	}
 	if err := zw.Close(); err != nil {
+		return err
+	}
+	// Checked last: an interrupt during the conversion above must not still
+	// create the output.
+	if err := d.ctx().Err(); err != nil {
 		return err
 	}
 	return writeNew(dst, out.Bytes(), 0o644)

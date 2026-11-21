@@ -22,12 +22,16 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 
 	"github.com/lucuma13/prem-down/internal/integrate"
 	"github.com/lucuma13/prem-down/internal/premdown"
@@ -41,6 +45,10 @@ const githubRepo = "lucuma13/prem-down"
 // came from a Premiere release this build does not know, so the conversion rests
 // on the assumption that the release only bumped its version number.
 const exitUnrecognisedRelease = 3
+
+// exitInterrupted is returned when a signal stopped the conversions: 128 plus
+// SIGINT's number, the shell's convention for a run cut short by Ctrl-C.
+const exitInterrupted = 130
 
 // prem-down version, overridden at build time via -ldflags "-X
 // main.version=1.2.3"
@@ -102,24 +110,49 @@ type cli struct {
 	// created is told about each output once it is written, so the file manager
 	// can show it. Nil does nothing.
 	created func(path string, dir bool)
+
+	// trapSignals lets SIGINT, SIGTERM and SIGHUP stop the conversions cleanly
+	// instead of killing the process mid-write. Only main sets it: signal
+	// handling is process-wide, and tests and the COM handler must not take it.
+	trapSignals bool
 }
 
 // newCLI wires a cli to the real process streams; used by main.
 func newCLI() *cli {
 	return &cli{
-		out:     os.Stdout,
-		err:     os.Stderr,
-		in:      os.Stdin,
-		checker: updates.New(githubRepo, "prem-down", version),
-		created: integrate.NotifyCreated,
+		out:         os.Stdout,
+		err:         os.Stderr,
+		in:          os.Stdin,
+		checker:     updates.New(githubRepo, "prem-down", version),
+		created:     integrate.NotifyCreated,
+		trapSignals: true,
 	}
 }
 
 // downgrader hands the engine this cli's streams, so engine progress and
 // per-file diagnostics land wherever the CLI's output is pointed - the real
 // process streams in main, in-memory buffers under test.
-func (c *cli) downgrader() *premdown.Downgrader {
-	return &premdown.Downgrader{Out: c.out, Err: c.err}
+func (c *cli) downgrader(ctx context.Context) *premdown.Downgrader {
+	return &premdown.Downgrader{Out: c.out, Err: c.err, Ctx: ctx}
+}
+
+// interruptible returns a context the first SIGINT, SIGTERM or SIGHUP cancels,
+// so the engine can stop between writes and remove a file it was partway
+// through. That first signal is all it takes over: a second one kills the
+// process as usual, for a run that does not stop quickly enough.
+//
+// It covers the conversions only. The rest of the run - the update check's
+// prompt above all - keeps the default behaviour, where Ctrl-C simply exits.
+//
+// On Windows, Go reports Ctrl-C as os.Interrupt and closing the console as
+// SIGTERM; SIGHUP never arrives there.
+func (c *cli) interruptible() (context.Context, context.CancelFunc) {
+	if !c.trapSignals {
+		return context.WithCancel(context.Background())
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	context.AfterFunc(ctx, stop)
+	return ctx, stop
 }
 
 // notifyCreated passes a written output to the created hook, if any.
@@ -300,11 +333,20 @@ func (c *cli) run(args []string) int {
 	// build's version map. Collected across the batch so a mixed selection still
 	// gets the one upgrade notice below.
 	unrecognised := false
+	ctx, stop := c.interruptible()
+	defer stop()
 	for _, j := range jobs {
-		d := c.downgrader()
+		if ctx.Err() != nil {
+			break
+		}
+		d := c.downgrader(ctx)
 		if j.production {
 			dst := premdown.OutputDir(j.path)
 			if err := d.DowngradeProduction(j.path, dst, targetVersion, verbose); err != nil {
+				if errors.Is(err, context.Canceled) {
+					_, _ = fmt.Fprintf(c.err, "interrupted: %s is incomplete\n", dst)
+					break
+				}
 				_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 				failed = true
 			} else {
@@ -316,6 +358,10 @@ func (c *cli) run(args []string) int {
 		dst := premdown.OutputPath(j.path)
 		err := d.Downgrade(j.path, dst, targetVersion, verbose)
 		unrecognised = unrecognised || d.SawUnrecognisedRelease()
+		if errors.Is(err, context.Canceled) {
+			_, _ = fmt.Fprintf(c.err, "interrupted: %s was not converted\n", j.path)
+			break
+		}
 		if err != nil {
 			_, _ = fmt.Fprintf(c.err, "error: %s: %v\n", j.path, err)
 			failed = true
@@ -335,6 +381,12 @@ func (c *cli) run(args []string) int {
 			_, _ = fmt.Fprintf(c.out, "wrote %s\n", dst)
 		}
 	}
+	// Whatever was left of the batch is skipped, and so is the update check.
+	if ctx.Err() != nil {
+		return exitInterrupted
+	}
+	stop()
+
 	// Only after a clean batch: a run that already reported an error is not a
 	// place to ask the user about update checks.
 	if !failed && c.checker != nil {

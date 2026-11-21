@@ -2,6 +2,8 @@ package premdown
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -373,12 +375,12 @@ func TestCopyFileFailures(t *testing.T) {
 	dir := t.TempDir()
 	src := writeFile(t, filepath.Join(dir, "src.prin"), prinSidecar)
 
-	if err := copyFile(filepath.Join(dir, "absent"), filepath.Join(dir, "a"), 0o644); err == nil {
+	if err := copyFile(context.Background(), filepath.Join(dir, "absent"), filepath.Join(dir, "a"), 0o644); err == nil {
 		t.Error("expected an error for an unreadable source")
 	}
 
 	taken := writeFile(t, filepath.Join(dir, "taken.prin"), "do not overwrite me")
-	if err := copyFile(src, taken, 0o644); err == nil {
+	if err := copyFile(context.Background(), src, taken, 0o644); err == nil {
 		t.Error("expected a refusal to overwrite an existing destination")
 	}
 	if got := readFile(t, taken); got != "do not overwrite me" {
@@ -391,7 +393,7 @@ func TestCopyFileFailures(t *testing.T) {
 		t.Skip("reading a directory handle is not an error on Windows")
 	}
 	partial := filepath.Join(dir, "partial")
-	if err := copyFile(dir, partial, 0o644); err == nil {
+	if err := copyFile(context.Background(), dir, partial, 0o644); err == nil {
 		t.Error("expected an error when the source cannot be read")
 	}
 	if _, err := os.Stat(partial); err == nil {
@@ -827,5 +829,37 @@ func TestUnrecognisedProductionWarnsOnceForTheProdset(t *testing.T) {
 	// The mirrored settings file takes the output folder's name, as Premiere requires.
 	if js := readProdsetFile(t, filepath.Join(dst, "out"+ProdsetExt)); !strings.Contains(js, `"mProjectVersion":`+strconv.Itoa(newestVersion)) {
 		t.Errorf("want the settings stamped at %d, got:\n%s", newestVersion, js)
+	}
+}
+
+// An interrupt (a cancelled Ctx) ends the walk before anything further is
+// written, and says the output folder is incomplete rather than finished.
+func TestDowngradeProductionStopsWhenCancelled(t *testing.T) {
+	src := newProduction(t, "MyProduction")
+	dst := src + "_downgraded"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := (&Downgrader{Ctx: ctx}).DowngradeProduction(src, dst, 43, false)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("DowngradeProduction = %v, want an incomplete-folder cancellation", err)
+	}
+	if entries, _ := os.ReadDir(dst); len(entries) != 0 {
+		t.Errorf("wrote %d entries after the cancellation", len(entries))
+	}
+}
+
+// A copy cancelled part way - a large media file when Ctrl-C arrives - removes
+// what it had written, like any other failed copy.
+func TestCopyFileStopsWhenCancelled(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, filepath.Join(dir, "src.prin"), prinSidecar)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dst := filepath.Join(dir, "dst.prin")
+	if err := copyFile(ctx, src, dst, 0o644); !errors.Is(err, context.Canceled) {
+		t.Fatalf("copyFile = %v, want context.Canceled", err)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("a cancelled copy must not leave its partial output behind")
 	}
 }
