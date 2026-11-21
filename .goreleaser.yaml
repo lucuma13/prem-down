@@ -28,12 +28,12 @@ changelog:
 # tap.
 #
 # A cask (not a formula) is used because Homebrew steers pre-built binaries
-# to casks. The postflight hook strips the com.apple.quarantine attribute so
-# the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run,
-# then installs the Finder Quick Action ("prem-down integrate on") so editors get
-# the right-click action without touching a terminal. The uninstall preflight
-# removes the Quick Action while the binary is still staged; it must never
-# fail, or it would wedge `brew uninstall`.
+# to casks. The preflight step strips the com.apple.quarantine attribute so
+# the unsigned/unnotarized binary isn't blocked by Gatekeeper on first run;
+# the installer script then installs the Finder Quick Action ("prem-down
+# integrate on") so editors get the right-click action without touching a
+# terminal. The uninstall script removes the Quick Action while the binary is
+# still staged; it must never fail, or it would wedge `brew uninstall`.
 homebrew_casks:
   - name: prem-down
     repository:
@@ -48,17 +48,21 @@ homebrew_casks:
       name: goreleaser-bot
       email: goreleaser-bot@users.noreply.github.com
     commit_msg_template: "prem-down: update to {{ .Tag }}"
+    custom_block: |
+      installer script: {
+        executable: "prem-down",
+        args:       ["integrate", "on"],
+      }
+      uninstall script: {
+        executable:   "prem-down",
+        args:         ["integrate", "off"],
+        must_succeed: false,
+      }
     hooks:
-      post:
-        install: |
-          if OS.mac? && File.exist?("#{staged_path}/prem-down")
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/prem-down"]
-            system_command "#{staged_path}/prem-down", args: ["integrate", "on"]
-          end
       pre:
-        uninstall: |
-          if OS.mac? && File.exist?("#{staged_path}/prem-down")
-            system_command "#{staged_path}/prem-down", args: ["integrate", "off"], must_succeed: false
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/prem-down"]
           end
 # Windows is NOT built or published from here: it ships only as an MSI (so the
 # Explorer context menu installs/uninstalls with the package), which GoReleaser
